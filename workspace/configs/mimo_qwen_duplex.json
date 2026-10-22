@@ -1,0 +1,42 @@
+{
+  "base_config": "demo_vad.json",
+  "duplex_session": {
+    "mimo_endpoint": "http://127.0.0.1:8090",
+    "mimo_model": "mimo-v2.6-flash",
+    "server_vad_model_path": null,
+    "server_vad_defaults": {
+      "threshold": 0.95,
+      "prefix_padding_ms": 300,
+      "silence_duration_ms": 500,
+      "min_speech_duration_ms": 96,
+      "create_response": true,
+      "interrupt_response": true
+    },
+    "max_sessions": 1,
+    "idle_ttl_s": 300.0,
+    "disconnect_grace_s": 30.0,
+    "max_pending_input_bytes_per_session": 16777216,
+    "max_pending_turns_per_session": 4,
+    "warmup_frames": 0
+  },
+  "stages": [
+    {
+      "stage_id": 0,
+      "max_num_seqs": 4,
+      "default_sampling_params": {
+        "temperature": 0.7,
+        "max_tokens": 400
+      }
+    },
+    {
+      "stage_id": 1,
+      "devices": "0",
+      "max_num_seqs": 4
+    },
+    {
+      "stage_id": 2,
+      "devices": "0",
+      "max_num_seqs": 4
+    }
+  ]
+}

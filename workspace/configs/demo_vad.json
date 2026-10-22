@@ -1,0 +1,57 @@
+{
+  "_readme": [
+    "这是 qwen3_omni_duplex.yaml 的 JSON 版 deploy config，额外暴露了 VAD 相关配置。",
+    "OmegaConf.load() 按内容解析而不看扩展名，JSON 是 YAML 子集，所以可以直接传给",
+    "`vllm serve --deploy-config <这个文件>`，和原先用 .yaml 的启动方式完全一样。",
+    "base_config 的其余字段（stage 0/1/2 的 gpu_memory_utilization / 采样参数等）",
+    "继续从 qwen3_omni_moe.yaml 继承，没有动。",
+    "",
+    "duplex_session.server_vad_model_path：",
+    "  null = 自动去 HF 缓存找 istupakov/silero-vad-onnx 的 silero_vad.onnx；",
+    "  找不到就回退到 pip 装的 silero-vad 包（torch 后端）。要固定本地 ONNX 文件就",
+    "  把该字段改成绝对路径；显式配了路径后文件不存在或缺 ONNX Runtime 会直接报错，",
+    "  不会静默回退。",
+    "",
+    "duplex_session.server_vad_defaults：",
+    "  服务端 VAD 默认值。客户端 session.update 里显式传的字段优先于这里，",
+    "  这里的值优先于代码兜底。合法键见 turn_detection.py 的 _SERVER_VAD_FIELDS",
+    "  （type 除外，是否开 VAD 始终由客户端的 turn_detection 是否为 null 决定）。",
+    "  下面这组数值和当前前端 JS（qwen3_turn.js）硬编码的默认档位完全一致，",
+    "  改这里的数值就能在不碰前端代码的情况下调整默认灵敏度/静音判定时长。",
+    "",
+    "duplex_session.max_sessions：并发 duplex 会话上限；改大后必须重启三阶段后端才生效。",
+    "duplex_session.idle_ttl_s：空闲会话回收时间（秒），null 表示永不因空闲回收。",
+    "duplex_session.disconnect_grace_s：WebSocket 断线后的宽限期（秒），期间可 session.resume。",
+    "duplex_session.max_pending_input_bytes_per_session：单会话未提交输入缓冲上限（字节）。",
+    "duplex_session.max_pending_turns_per_session：单会话排队轮次上限。",
+    "duplex_session.warmup_frames：启动预热静音帧数；0 表示不预热（音频主导模型的默认值）。"
+  ],
+  "base_config": "../../vllm-omni/vllm_omni/deploy/qwen3_omni_moe.yaml",
+  "session_mode": "duplex",
+  "stages": [
+    {
+      "stage_id": 0,
+      "limit_mm_per_prompt": {
+        "audio": 4,
+        "image": 8
+      }
+    }
+  ],
+  "duplex_session": {
+    "server_vad_model_path": null,
+    "server_vad_defaults": {
+      "threshold": 0.95,
+      "prefix_padding_ms": 300,
+      "silence_duration_ms": 500,
+      "min_speech_duration_ms": 96,
+      "create_response": true,
+      "interrupt_response": true
+    },
+    "max_sessions": 1,
+    "idle_ttl_s": 300.0,
+    "disconnect_grace_s": 30.0,
+    "max_pending_input_bytes_per_session": 16777216,
+    "max_pending_turns_per_session": 4,
+    "warmup_frames": 0
+  }
+}

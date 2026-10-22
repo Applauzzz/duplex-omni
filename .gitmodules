@@ -1,0 +1,8 @@
+[submodule "vllm-omni"]
+	path = vllm-omni
+	url = https://github.com/Applauzzz/vllm-omni.git
+	branch = duplex-stage2
+[submodule "vllm-src"]
+	path = vllm-src
+	url = https://github.com/Applauzzz/vllm.git
+	branch = duplex-stage2
