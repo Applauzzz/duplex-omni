@@ -890,3 +890,22 @@ are preserved separately. GPU service/API operations used explicit escalation.
   was interrupted (exit 130); sandbox ls-remote failed DNS (exit 128); the
   escalated ls-remote with github_env.sh timed out after 25s (exit 124) without
   an advertised remote SHA. No push or successful remote refresh claimed yet.
+- Created local checkpoint commit 98daa7aaec0420d1bd6c5666f328d58cdbae62d6
+  (45 files); worktree clean, local main ahead of origin/main by one. Fresh
+  frontend Node state check passed. Escalated DNS resolved github.com, but
+  HTTPS curl connection timed out (exit 28). A second escalated ls-remote
+  timed out after 30s (exit 124); ordinary push after github_env.sh timed
+  out after 35s (exit 124). No remote publication verified.
+- User suggested clearing proxy variables. An earlier SSH remote check was
+  interrupted by the user; no successful SSH result was observed. Process
+  inventory after interruption found no running Git/SSH command, only exited
+  zombies under PID 1. After sourcing github_env.sh, no proxy variable names
+  were set and Git http.proxy/https.proxy/URL rewrite checks were unset.
+  Process-local unset of lower/uppercase HTTP(S)/ALL/FTP/NO_PROXY followed by
+  ls-remote failed DNS inside sandbox (exit 128) and timed out after 15s
+  outside sandbox (exit 124). Unsetting proxies did not restore GitHub access.
+  Commit 98daa7a remains ahead by one; no remote push was verified.
+- A final normal `git push origin main` after process-local proxy unset also
+  timed out after 15s outside sandbox (exit 124), with no success message.
+  Remote publication remains pending network access; no forced push, remote
+  configuration changes, service startup or additional GPU validation.
