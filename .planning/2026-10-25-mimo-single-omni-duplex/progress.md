@@ -909,3 +909,20 @@ are preserved separately. GPU service/API operations used explicit escalation.
   timed out after 15s outside sandbox (exit 124), with no success message.
   Remote publication remains pending network access; no forced push, remote
   configuration changes, service startup or additional GPU validation.
+
+## 2026-10-26: GitHub Publication Completed
+- Recovered the existing selected plan and rechecked the clean parent worktree,
+  HTTPS origin, unchanged submodule gitlinks and local two-commit lead. No plan
+  reinitialization, service startup, force push, remote rewrite or TLS change.
+- In one Bash process, sourced env.sh followed by github_env.sh and retained the
+  resulting proxy environment. `git ls-remote origin refs/heads/main` succeeded
+  and advertised 9628f6cd00b4d61226d4f61be9b0783ae2e3c1e9.
+- The ordinary `git push origin main` succeeded over the existing HTTPS remote:
+  9628f6c..ef45a39, main -> main. This published checkpoint commit 98daa7a and
+  connectivity/publication record ef45a39.
+- The first post-push comparison command had an awk quoting error (exit 2); it
+  did not alter Git state. The corrected cut-based comparison exited 0 and
+  matched local and remote at ef45a3971904febeaa1dcc35f955348980010c78.
+- Broader phase gates remain open exactly as recorded: voice consistency,
+  actual browser microphone/playback, strict stage idle, acoustic/semantic
+  policy and performance acceptance. No fresh GPU replay is claimed.
