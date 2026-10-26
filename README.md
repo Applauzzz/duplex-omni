@@ -537,6 +537,8 @@ git -C vllm-src fetch upstream
 
 ### 文档入口
 
+- [MiMo 单核心双工 + Qwen3-TTS](Doc/stage3-mimo-single-omni/README.md)：已接通原实时前端、Silero VAD、MiMo 正文流与独立 TTS，支持播放 ACK 和打断恢复；[2026-10-26 阶段快照](Doc/stage3-mimo-single-omni/checkpoint_20261026.md)记录提交范围、验证和剩余验收项。
+- 当前任务计划：`.planning/2026-10-25-mimo-single-omni-duplex/`；新会话先按 `AGENTS.md` 恢复状态。
 - [阶段一交接入口](Doc/Qwen3_Omni_duplex_legacy/README.md)
 - [阶段一架构](Doc/Qwen3_Omni_duplex_legacy/01_architecture.md)
 - [阶段一历史起停与排错](Doc/Qwen3_Omni_duplex_legacy/02_running.md)

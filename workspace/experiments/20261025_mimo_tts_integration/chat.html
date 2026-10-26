@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MiMo + Qwen3-TTS</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f5f7;color:#24272c;font:15px system-ui,sans-serif;letter-spacing:0}
+header{background:#fff;border-bottom:1px solid #d8dce2;padding:16px 24px}
+.bar{max-width:960px;margin:auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+h1{font-size:21px;margin:0}.bar a{color:#21685c;font-size:13px;margin-left:auto}
+#health{font-size:13px;color:#57636f}main{max-width:960px;margin:auto;padding:24px}
+.settings{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid #d8dce2}
+label{font-size:13px;font-weight:600}select,textarea{font:inherit;border:1px solid #b8bec8;background:white;border-radius:4px;color:inherit}
+select{padding:8px;margin-left:8px}button{width:42px;height:42px;flex:none;border:1px solid #b7bec8;border-radius:4px;background:#fff;cursor:pointer;font:22px system-ui;color:#303840}
+button:hover{background:#eef1f4}button:disabled{opacity:.4;cursor:default}button.primary{background:#157b68;border-color:#157b68;color:#fff}
+button.danger{color:#b33b4d;border-color:#b33b4d}button.recording{color:white;background:#b33b4d}
+#clear{margin-left:auto}.thread{min-height:180px;max-height:52vh;overflow:auto;margin:20px 0;scrollbar-gutter:stable}
+.message{border-bottom:1px solid #d8dce2;padding:16px 0}.message.user{padding-left:18px;border-left:3px solid #27759b}
+.role{font-size:12px;color:#65717c;margin-bottom:8px}.body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
+textarea{padding:12px;min-height:86px;width:100%;resize:vertical;line-height:1.6}
+textarea:focus,select:focus{outline:2px solid #157b68;outline-offset:2px}
+.tools{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;min-height:42px}
+#state{font-size:13px;color:#59656f;overflow-wrap:anywhere}canvas{display:block;width:100%;height:80px;margin:18px 0;border-bottom:1px solid #d8dce2}
+.metrics{display:flex;gap:20px;font-size:12px;color:#68737c;flex-wrap:wrap}.metrics strong{font-weight:600;color:#303840}
+audio{width:100%;margin-top:16px}@media(max-width:540px){header{padding:16px}main{padding:16px}.settings{gap:10px}select{margin-left:4px}h1{font-size:19px}.thread{max-height:45vh}}
+</style>
+<header><div class="bar"><h1>MiMo + Qwen3-TTS</h1><span id="health">Connecting</span><a href="/tts">TTS &#35797;&#21548;</a></div></header>
+<main>
+<div class="settings">
+<label>&#38899;&#33394;<select id="voice"><option value="vivian">Vivian</option><option value="serena">Serena</option><option value="ryan">Ryan</option><option value="aiden">Aiden</option></select></label>
+<label>&#35821;&#35328;<select id="language"><option>Auto</option><option>Chinese</option><option>English</option><option>Japanese</option><option>Korean</option><option>French</option><option>German</option><option>Spanish</option></select></label>
+<button id="clear" title="&#26032;&#23545;&#35805;" aria-label="&#26032;&#23545;&#35805;">&#8634;</button>
+</div>
+<div id="thread" class="thread" aria-live="polite"></div>
+<form id="form">
+<textarea id="input" maxlength="4096" aria-label="&#28040;&#24687;" placeholder="&#36755;&#20837;&#28040;&#24687;"></textarea>
+<div class="tools">
+<button type="button" id="record" title="&#24405;&#38899;" aria-label="&#24405;&#38899;">&#9679;</button>
+<button type="submit" id="send" class="primary" title="&#21457;&#36865;" aria-label="&#21457;&#36865;">&#8593;</button>
+<button type="button" id="stop" class="danger" disabled title="&#20572;&#27490;&#22238;&#22797;" aria-label="&#20572;&#27490;&#22238;&#22797;">&#9632;</button>
+<span id="state">Ready</span>
+</div>
+</form>
+<canvas id="wave" aria-label="&#38899;&#39057;&#27874;&#24418;"></canvas>
+<div class="metrics"><span>MiMo <strong id="texttime">-</strong></span><span>TTS <strong id="audiotime">-</strong></span><span>&#38899;&#39057; <strong id="duration">-</strong></span></div>
+<audio id="replay" controls hidden></audio>
+</main>
+<script>
+const $=id=>document.getElementById(id),SR=24000;
+let revision=0,active=null,ctx=null,sources=[],history=[],recording=null,recordRevision=0,blobUrl=null;
+function wav(parts,rate){
+  const size=parts.reduce((n,p)=>n+p.length,0),out=new Uint8Array(44+size),v=new DataView(out.buffer);
+  const str=(o,s)=>{for(let i=0;i<s.length;i++)out[o+i]=s.charCodeAt(i)};
+  str(0,"RIFF");v.setUint32(4,36+size,true);str(8,"WAVE");str(12,"fmt ");v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);
+  v.setUint16(32,2,true);v.setUint16(34,16,true);str(36,"data");v.setUint32(40,size,true);
+  let offset=44;for(const part of parts){out.set(part,offset);offset+=part.length}return out;
+}
+function base64(bytes){let text="";for(let i=0;i<bytes.length;i+=8192)text+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(text)}
+function pcmBytes(encoded){return Uint8Array.from(atob(encoded),c=>c.charCodeAt(0))}
+function draw(samples){
+  const canvas=$("wave"),width=canvas.clientWidth,height=80,dpr=devicePixelRatio||1;
+  canvas.width=width*dpr;canvas.height=height*dpr;const c=canvas.getContext("2d");c.scale(dpr,dpr);
+  c.strokeStyle="#157b68";c.beginPath();const step=Math.max(1,Math.ceil(samples.length/width));
+  for(let x=0;x<width;x++){let peak=0;for(let i=x*step;i<Math.min(samples.length,(x+1)*step);i++)peak=Math.max(peak,Math.abs(samples[i]));c.moveTo(x,height/2-peak*36);c.lineTo(x,height/2+peak*36)}c.stroke();
+}
+function message(role,text){
+  const article=document.createElement("div");article.className="message "+role;
+  const label=document.createElement("div");label.className="role";label.textContent=role==="user"?"You":"MiMo";
+  const body=document.createElement("div");body.className="body";body.textContent=text;
+  article.append(label,body);$("thread").append(article);$("thread").scrollTop=$("thread").scrollHeight;return body;
+}
+function commit(turn){
+  if(turn.committed)return;turn.committed=true;
+  let end=0;for(const segment of turn.segments){if(!segment.done||ctx.currentTime<segment.playEnd)break;end=segment.end}
+  if(end>0){history.push(turn.user,{role:"assistant",input:turn.text.slice(0,end)});history=history.slice(-8)}
+}
+function stop(){
+  revision++;if(active){active.controller.abort();commit(active);active=null}
+  for(const source of sources){try{source.stop()}catch{}}sources=[];$("replay").pause();
+  $("stop").disabled=true;$("state").textContent="Stopped";
+}
+function stopRecording(){
+  recordRevision++;const capture=recording;recording=null;
+  if(!capture)return null;
+  clearTimeout(capture.timer);capture.node.port.onmessage=null;capture.node.disconnect();capture.source.disconnect();capture.gain.disconnect();
+  capture.stream.getTracks().forEach(track=>track.stop());capture.context.close();
+  $("record").classList.remove("recording");$("record").title="\u5f55\u97f3";return capture;
+}
+function payloadHistory(user){
+  const prior=history.slice(-8);
+  const withinBudget=()=>prior.reduce((n,e)=>n+(e.audio?.data.length||0),user.audio?.data.length||0)<=4*1024*1024
+    &&prior.reduce((n,e)=>n+e.input.length,user.input.length)<=16000;
+  while(prior.length&&!withinBudget())prior.splice(0,2);
+  return prior;
+}
+async function send(user){
+  stop();stopRecording();if(!user.input.trim()&&!user.audio)return;
+  const current=revision;ctx??=new AudioContext();await ctx.resume();if(current!==revision)return;
+  const turn={controller:new AbortController(),user,text:"",segments:[],parts:[],next:ctx.currentTime,samples:0,committed:false};
+  active=turn;message("user",user.input||"\u8bed\u97f3\u6d88\u606f");turn.body=message("assistant","");
+  $("input").value="";$("stop").disabled=false;$("state").textContent="MiMo";$("replay").hidden=true;
+  $("texttime").textContent=$("audiotime").textContent=$("duration").textContent="-";
+  const started=performance.now();let firstText=false,firstAudio=false,pending="",responseId=null,doneEvent=false;
+  const event=e=>{
+    if(current!==revision)return;
+    responseId??=e.response_id;if(e.response_id!==responseId)throw Error("Mismatched response");
+    if(e.type==="error")throw Error(e.message);
+    if(e.type==="start"&&e.sample_rate!==SR)throw Error("Unsupported sample rate");
+    if(e.type==="text"){
+      if(!firstText){$("texttime").textContent=Math.round(performance.now()-started)+" ms";firstText=true}
+      turn.text+=e.delta;turn.body.textContent=turn.text;$("thread").scrollTop=$("thread").scrollHeight;
+    }else if(e.type==="segment"){
+      if(e.segment_id!==turn.segments.length)throw Error("Out-of-order speech segment");
+      turn.segments.push({end:e.end,playEnd:turn.next,done:false});
+    }else if(e.type==="audio"){
+      if(e.segment_id!==turn.segments.length-1)throw Error("Out-of-order PCM");
+      const pcm=pcmBytes(e.pcm);if(pcm.length!==e.samples*2)throw Error("Invalid PCM size");
+      if(!firstAudio){$("audiotime").textContent=Math.round(performance.now()-started)+" ms";firstAudio=true}
+      const floats=new Float32Array(e.samples),view=new DataView(pcm.buffer);
+      for(let i=0;i<floats.length;i++)floats[i]=view.getInt16(i*2,true)/32768;
+      const buffer=ctx.createBuffer(1,floats.length,SR);buffer.copyToChannel(floats,0);
+      const source=ctx.createBufferSource();source.buffer=buffer;source.connect(ctx.destination);sources.push(source);
+      source.onended=()=>{sources=sources.filter(item=>item!==source)};
+      turn.next=Math.max(turn.next,ctx.currentTime+.03);source.start(turn.next);turn.next+=buffer.duration;
+      turn.segments[e.segment_id].playEnd=turn.next;turn.parts.push(pcm);turn.samples+=floats.length;
+      $("duration").textContent=(turn.samples/SR).toFixed(2)+" s";$("state").textContent="Playing";draw(floats);
+    }else if(e.type==="segment_done"){
+      const segment=turn.segments[e.segment_id];if(!segment||segment.done)throw Error("Invalid segment completion");segment.done=true;
+    }else if(e.type==="done"){
+      if(e.text!==turn.text||e.samples!==turn.samples)throw Error("Incomplete reply");
+      doneEvent=true;
+    }
+  };
+  try{
+    const response=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({...user,history:payloadHistory(user),voice:$("voice").value,language:$("language").value}),signal:turn.controller.signal});
+    if(!response.ok)throw Error(await response.text());
+    const reader=response.body.getReader(),decoder=new TextDecoder();
+    for(;;){
+      const {done,value}=await reader.read();if(current!==revision)return;
+      if(done){pending+=decoder.decode();break}
+      pending+=decoder.decode(value,{stream:true});let split;
+      while((split=pending.indexOf("\n"))>=0){const line=pending.slice(0,split);pending=pending.slice(split+1);if(line)event(JSON.parse(line))}
+    }
+    if(pending.trim()||!doneEvent||!turn.samples)throw Error("Reply stream disconnected");
+    if(blobUrl)URL.revokeObjectURL(blobUrl);blobUrl=URL.createObjectURL(new Blob([wav(turn.parts,SR)],{type:"audio/wav"}));
+    $("replay").src=blobUrl;$("replay").hidden=false;
+    const finish=()=>{if(current!==revision)return;if(ctx.currentTime>=turn.next){commit(turn);active=null;$("state").textContent="Done";$("stop").disabled=true}else requestAnimationFrame(finish)};finish();
+  }catch(error){
+    if(current!==revision)return;stop();$("state").textContent=error.name==="AbortError"?"Stopped":error.message;
+  }
+}
+$("form").onsubmit=e=>{e.preventDefault();send({role:"user",input:$("input").value}).catch(error=>{$("state").textContent=error.message})};
+$("stop").onclick=()=>{stop();stopRecording()};
+$("clear").onclick=()=>{stop();stopRecording();history=[];$("thread").replaceChildren();$("replay").hidden=true;$("state").textContent="Ready"};
+$("record").onclick=async()=>{
+  if(recording){
+    const capture=stopRecording();if(capture.parts.length)send({role:"user",input:$("input").value,audio:{format:"wav",data:base64(wav(capture.parts,capture.context.sampleRate))}}).catch(error=>{$("state").textContent=error.message});return;
+  }
+  stop();const current=++recordRevision;$("state").textContent="Microphone";
+  let stream=null,context=null;
+  try{
+    if(!navigator.mediaDevices||!window.AudioWorkletNode)throw Error("Microphone unavailable");
+    stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
+    if(current!==recordRevision){stream.getTracks().forEach(track=>track.stop());return}
+    context=new AudioContext({sampleRate:24000});await context.resume();await context.audioWorklet.addModule("/capture_worklet.js");
+    if(current!==recordRevision){stream.getTracks().forEach(track=>track.stop());context.close();return}
+    const source=context.createMediaStreamSource(stream),node=new AudioWorkletNode(context,"fullduplex-pcm-capture"),gain=context.createGain();gain.gain.value=0;
+    source.connect(node);node.connect(gain);gain.connect(context.destination);
+    const capture={stream,context,source,node,gain,parts:[],samples:0,timer:null};recording=capture;
+    node.port.onmessage=e=>{
+      if(recording!==capture)return;const bytes=new Uint8Array(e.data);
+      if(capture.samples+bytes.length/2>context.sampleRate*30){$("record").click();return}
+      capture.parts.push(bytes);capture.samples+=bytes.length/2;$("state").textContent="Recording "+(capture.samples/context.sampleRate).toFixed(1)+" s";
+    };
+    capture.timer=setTimeout(()=>{if(recording===capture)$("record").click()},30000);
+    $("record").classList.add("recording");$("record").title="\u7ed3\u675f\u5e76\u53d1\u9001";$("stop").disabled=false;
+  }catch(error){stream?.getTracks().forEach(track=>track.stop());context?.close();$("state").textContent=error.message}
+};
+async function health(){try{const response=await fetch("/api/status"),s=await response.json();$("health").textContent=(s.mimo?"MiMo ready":"MiMo loading")+" / "+(s.tts?"TTS ready":"TTS loading")}catch{$("health").textContent="Disconnected"}}
+health();setInterval(health,5000);draw(new Float32Array(0));
+window.addEventListener("pagehide",()=>{stop();stopRecording()});
+</script>
+</html>

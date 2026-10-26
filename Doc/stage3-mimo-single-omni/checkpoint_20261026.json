@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-26",
+  "milestone": "basic_mimo_tts_integration",
+  "publication": "user_requested_origin_main_checkpoint",
+  "plan_id": "2026-10-25-mimo-single-omni-duplex",
+  "versions": {
+    "parent_base": "9628f6cd00b4d61226d4f61be9b0783ae2e3c1e9",
+    "vllm_src": "ba860768a965efadcf059089c04862c46e568242",
+    "vllm_omni": "6a841874ef56cf0590c5f5c24889a4ca65e6ac15",
+    "native_binary_donor": "ced6857afa0ea7b2e3f0846a62e1394e90f15607",
+    "python": "3.12.14",
+    "torch": "2.13.0+cu129",
+    "transformers": "5.14.1",
+    "vllm_wheel": "0.30.1.dev0+gced6857af.d20260929.cu129",
+    "vllm_omni_wheel": "0.1.0",
+    "aiohttp": "3.14.3",
+    "numpy": "2.3.5"
+  },
+  "source_config_sha256": {
+    "workspace/experiments/20261025_mimo_single_phase2/qwen3_tts_h20.yaml": "d7b1fccdf8236f0742930a721cf634139574fcd0775cef0f6e174067ef5a7329",
+    "workspace/experiments/20261025_mimo_tts_integration/backend.py": "20b001bba0a82e2c4d83b7ed70126f5250e47d4752730a0a3e5fc14f4148b97d",
+    "workspace/experiments/20261025_mimo_tts_integration/realtime_backend.py": "4bfade766f31377defd2d6ac9d1365597415cc87cd7c5b2ad5e47e690baf90f9",
+    "workspace/experiments/20261025_mimo_tts_integration/realtime_server.py": "02d359272bc8ec2a864f5e117eb82d81841552182c54e6b0e98bb92e93165f35",
+    "workspace/experiments/20261025_mimo_tts_integration/mimo_profile.js": "2516152288cc30f9d0c266ca3bfe8fadf8129cdb4dce2daca95dee8e9289cc41"
+  },
+  "configuration": {
+    "understanding_model": "MiMo-V2.6-Flash-RL",
+    "rendering_model": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "voice": "vivian",
+    "language": "Auto",
+    "seed": 42,
+    "sample_rate": 24000,
+    "tts_input_mode": "independent_sentence_requests",
+    "mimo_cuda_devices": "0,1,2,3",
+    "tts_cuda_devices": "4",
+    "ui_cuda_devices": "",
+    "mimo_api_port": 8090,
+    "tts_api_port": 8093,
+    "ui_port": 8080
+  },
+  "validation": {
+    "focused_tests": {"passed": 17, "failed": 0, "reported_seconds": 31.010},
+    "node_frontend_state": "pass",
+    "historical_gpu_realtime_artifact": "realtime_check_20261025T173356Z_b5683805",
+    "october26_gpu_replay": "interrupted_no_completed_result_discovered",
+    "browser_microphone_playback": "not_accepted",
+    "wider_regression": "not_run_for_this_checkpoint"
+  },
+  "runtime": {
+    "state": "stopped_by_user_request",
+    "last_run": "workspace/logs/20261026T060227Z_mimo_single_phase2_b8e9f10b",
+    "shutdown_artifact": "shutdown_20261026T080615Z_c9f43147",
+    "signal": "SIGINT_after_manifest_ownership_checks",
+    "all_gpu_memory_mib_after_shutdown": 0,
+    "service_ports_have_listeners": false,
+    "supervisor_exit_codes": null
+  },
+  "open_gates": [
+    "cross_text_voice_consistency",
+    "browser_microphone_playback",
+    "mixed_proper_noun_quality",
+    "strict_real_stage_connector_idle",
+    "wider_acoustic_false_positives_echo",
+    "learned_semantic_policy",
+    "performance_long_session_regression"
+  ],
+  "excluded_from_git": ["raw_logs", "audio", "runtime_caches", "native_binaries", "models", "credentials"]
+}
