@@ -16,6 +16,12 @@ from vllm_omni.engine.duplex.realtime_commands import translate_realtime_command
 from vllm_omni.engine.duplex.session.manager import DuplexSessionManager
 
 from realtime_backend import ExternalStagePort, MiMoTTSPlugin
+from semantic_vad import (
+    SemanticRealtimeAdapter,
+    SemanticVADConfig,
+    VAEDDecision,
+    VASDDecision,
+)
 
 
 class FakeBackend:
@@ -247,6 +253,72 @@ class HostTests(unittest.IsolatedAsyncioTestCase):
                     while app["connections"]:
                         await asyncio.sleep(.01)
                 self.assertFalse(app["active_sessions"])
+
+    async def test_semantic_vad_handshake_and_fsm_dispatch(self):
+        from realtime_server import create_app
+
+        class Provider:
+            async def decide_break(self, audio_chunks, *, context):
+                return VASDDecision(True)
+
+            async def decide_complete(self, audio_chunks, *, context):
+                return VAEDDecision(True)
+
+        class VAD:
+            def process_base64(self, *_args, **_kwargs):
+                from types import SimpleNamespace
+                return SimpleNamespace(speech_active=True)
+
+        def adapter_factory(config, provider, **_kwargs):
+            self.assertIsInstance(config, SemanticVADConfig)
+            return SemanticRealtimeAdapter(config, provider, vad=VAD())
+
+        app = create_app()
+        app.cleanup_ctx.clear()
+        app["backend"] = FakeBackend()
+        app["semantic_vad_provider"] = Provider()
+        app["semantic_vad_adapter_factory"] = adapter_factory
+        app["vad_provider"] = None
+        async with TestServer(app) as server:
+            async with ClientSession(trust_env=False) as client:
+                ws = await client.ws_connect(server.make_url("/v1/realtime"))
+                await ws.send_json({"type": "session.update", "session": {
+                    "model": "mimo-v2.6-flash",
+                    "audio": {"input": {
+                        "format": {"type": "audio/pcm", "rate": 16000},
+                        "turn_detection": {
+                            "type": "semantic_vad",
+                            "threshold": 0.5,
+                            "min_speech_duration_ms": 32,
+                        },
+                    }},
+                }})
+                async with asyncio.timeout(5):
+                    while (await ws.receive_json())["type"] != "session.updated":
+                        pass
+                await ws.send_json({
+                    "type": "session.update",
+                    "session": {"instructions": "Updated without changing turn detection."},
+                })
+                async with asyncio.timeout(5):
+                    while True:
+                        update = await ws.receive_json()
+                        self.assertNotEqual(update["type"], "error", update)
+                        if update["type"] == "session.updated":
+                            break
+                audio = base64.b64encode(
+                    (np.ones(512, dtype="<i2") * 12000).tobytes()).decode()
+                await ws.send_json({"type": "input_audio_buffer.append", "audio": audio})
+                await ws.send_json({"type": "input_audio_buffer.append", "audio": audio})
+                await ws.send_json({"type": "input_audio_buffer.append", "audio": audio})
+                async with asyncio.timeout(5):
+                    while True:
+                        event = await ws.receive_json()
+                        if event["type"] == "response.done":
+                            break
+                        self.assertNotEqual(event["type"], "error", event)
+                self.assertEqual(len(app["backend"].calls), 1)
+                await ws.close()
 
 
 if __name__ == "__main__":

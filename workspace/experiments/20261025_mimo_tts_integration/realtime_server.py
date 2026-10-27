@@ -20,6 +20,11 @@ from vllm_omni.entrypoints.duplex.realtime_input import RealtimeEnvelope
 
 from backend import Backend, ROOT, client_timeout
 from realtime_backend import ExternalStagePort, MiMoTTSPlugin
+from semantic_vad import (
+    MiMoSemanticVADProvider,
+    SemanticRealtimeAdapter,
+    extract_semantic_vad_config,
+)
 from server import chat, preview
 
 
@@ -80,6 +85,21 @@ async def realtime(request):
     envelope.default_model = "mimo-v2.6-flash"
     opened = False
     reserved = False
+    semantic_vad = None
+
+    def dispatch(payload):
+        command = envelope.translate(payload)
+        manager.dispatch(DuplexSessionCommandMessage(session_id=sid, command=command))
+
+    def updates_turn_detection(payload):
+        session = payload.get("session")
+        if not isinstance(session, dict):
+            return False
+        if "turn_detection" in session:
+            return True
+        audio = session.get("audio")
+        audio_input = audio.get("input") if isinstance(audio, dict) else None
+        return isinstance(audio_input, dict) and "turn_detection" in audio_input
 
     async def send():
         try:
@@ -104,7 +124,7 @@ async def realtime(request):
     request.app["connections"].add((manager, port))
 
     async def receive():
-        nonlocal opened, reserved
+        nonlocal opened, reserved, semantic_vad
         async for frame in ws:
             if frame.type != WSMsgType.TEXT:
                 if frame.type == WSMsgType.ERROR:
@@ -132,6 +152,13 @@ async def realtime(request):
                     if session_payload.get("model", "mimo-v2.6-flash") != "mimo-v2.6-flash":
                         raise ValueError("Only mimo-v2.6-flash is available.")
                     envelope.note_session_payload(session_payload)
+                    semantic_config = extract_semantic_vad_config(session_payload)
+                    if semantic_config is not None:
+                        semantic_vad = request.app["semantic_vad_adapter_factory"](
+                            semantic_config,
+                            request.app["semantic_vad_provider"],
+                            backend_provider=request.app["vad_provider"],
+                        )
                     config = DuplexSessionConfig.from_realtime(
                         session_payload, model="mimo-v2.6-flash",
                         server_vad_defaults=request.app["runtime"].server_vad_defaults,
@@ -146,9 +173,29 @@ async def realtime(request):
                     continue
                 if envelope.is_envelope_event(payload):
                     raise ValueError("Connection resume is not enabled.")
-                command = envelope.translate(payload)
-                manager.dispatch(DuplexSessionCommandMessage(session_id=sid, command=command))
-            except (ValueError, TypeError, KeyError) as error:
+                if (
+                    semantic_vad is not None
+                    and payload.get("type") == "session.update"
+                    and updates_turn_detection(payload)
+                ):
+                    raise ValueError("Changing semantic_vad configuration after session open is unsupported.")
+                if semantic_vad is not None and payload.get("type") == "input_audio_buffer.append":
+                    transition, commands = await semantic_vad.process_append(
+                        payload,
+                        default_format=envelope.defaults.input_audio_format,
+                        default_sample_rate_hz=envelope.defaults.input_sample_rate_hz,
+                        context={"request_id": sid},
+                    )
+                    LOG.info("Semantic VAD session=%s %s", sid, transition.as_log())
+                    for command_payload in commands:
+                        dispatch(command_payload)
+                    continue
+                if semantic_vad is not None and payload.get("type") in {
+                    "input_audio_buffer.clear", "input.cancel",
+                }:
+                    semantic_vad.reset()
+                dispatch(payload)
+            except (ValueError, TypeError, KeyError, RuntimeError, OverflowError) as error:
                 if reserved and not opened:
                     request.app["active_sessions"].discard(sid)
                     reserved = False
@@ -161,6 +208,8 @@ async def realtime(request):
             await manager.handle(CloseDuplexSessionMessage(
                 control_id=uuid.uuid4().hex, session_id=sid, reason="disconnect"))
         finally:
+            if semantic_vad is not None:
+                semantic_vad.close()
             await port.shutdown()
             await manager.shutdown()
             request.app["active_sessions"].discard(sid)
@@ -191,6 +240,8 @@ async def context(app):
     async with ClientSession(trust_env=False, timeout=client_timeout()) as client:
         app["client"] = client
         app["backend"] = Backend(client, app["mimo_url"], app["tts_url"])
+        app["semantic_vad_provider"] = MiMoSemanticVADProvider(
+            client, app["mimo_url"])
         yield
         if app["cleanup_tasks"]:
             await asyncio.gather(*tuple(app["cleanup_tasks"]), return_exceptions=True)
@@ -215,6 +266,7 @@ def create_app():
     app["active_sessions"] = set()
     app["gate"] = asyncio.Semaphore(2)
     app["outcomes"] = deque(maxlen=32)
+    app["semantic_vad_adapter_factory"] = SemanticRealtimeAdapter
     app.cleanup_ctx.append(context)
     app.router.add_get("/", index)
     app.router.add_get("/v1/realtime", realtime)
