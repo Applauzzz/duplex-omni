@@ -5,13 +5,12 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import io
 import json
 import logging
 import math
-import re
 import time
 from typing import Protocol
 import wave
@@ -69,6 +68,12 @@ class AudioChunkBatch:
 class VASDDecision:
     break_decision: bool
     reject: bool = False
+    raw_output: str | None = field(default=None, compare=False)
+    command: str | None = field(default=None, compare=False)
+    valid: bool = field(default=True, compare=False)
+    logprobs: dict[str, float] = field(default_factory=dict, compare=False)
+    probability: float | None = field(default=None, compare=False)
+    margin: float | None = field(default=None, compare=False)
 
     @property
     def label(self) -> SemanticLabel:
@@ -80,6 +85,12 @@ class VASDDecision:
 @dataclass(frozen=True, slots=True)
 class VAEDDecision:
     complete: bool
+    raw_output: str | None = field(default=None, compare=False)
+    command: str | None = field(default=None, compare=False)
+    valid: bool = field(default=True, compare=False)
+    logprobs: dict[str, float] = field(default_factory=dict, compare=False)
+    probability: float | None = field(default=None, compare=False)
+    margin: float | None = field(default=None, compare=False)
 
     @property
     def label(self) -> SemanticLabel:
@@ -88,11 +99,25 @@ class VAEDDecision:
 
 @dataclass(frozen=True, slots=True)
 class FSMInput:
-    audio_chunk: object
+    audio_chunk: object | None
     speech: bool
     break_decision: bool | None = None
     reject: bool | None = None
     complete: bool | None = None
+    model_output: str | None = None
+    semantic_command: str | None = None
+    semantic_valid: bool | None = None
+    request_kind: str | None = None
+    semantic_logprobs: dict[str, float] | None = None
+    semantic_probability: float | None = None
+    semantic_margin: float | None = None
+    break_accepted: bool | None = None
+    break_confirmation_count: int | None = None
+    completion_accepted: bool | None = None
+    completion_confirmation_count: int | None = None
+    semantic_endpoint_evaluated: bool = False
+    force_decode: bool = False
+    decode_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,12 +127,27 @@ class FSMOutput:
     event: InputEvent
     interrupt: bool
     prefill_audio: tuple[object, ...] | None
+    decode_audio: tuple[object, ...] | None
     semantic_label: SemanticLabel
     speech: bool
     break_decision: bool | None
     reject: bool | None
     complete: bool | None
     timestamp: float
+    decision_latency_ms: float | None = None
+    model_output: str | None = None
+    semantic_command: str | None = None
+    semantic_valid: bool | None = None
+    request_kind: str | None = None
+    semantic_logprobs: dict[str, float] | None = None
+    semantic_probability: float | None = None
+    semantic_margin: float | None = None
+    break_accepted: bool | None = None
+    break_confirmation_count: int | None = None
+    completion_accepted: bool | None = None
+    completion_confirmation_count: int | None = None
+    semantic_endpoint_evaluated: bool = False
+    decode_reason: str | None = None
 
     def as_log(self) -> dict[str, object]:
         return {
@@ -122,6 +162,21 @@ class FSMOutput:
             "fsm_event": self.event.value,
             "interrupt": self.interrupt,
             "prefill_audio_chunk_count": len(self.prefill_audio or ()),
+            "decode_audio_chunk_count": len(self.decode_audio or ()),
+            "decision_latency_ms": self.decision_latency_ms,
+            "model_output": self.model_output,
+            "semantic_command": self.semantic_command,
+            "semantic_valid": self.semantic_valid,
+            "request_kind": self.request_kind,
+            "semantic_logprobs": self.semantic_logprobs,
+            "semantic_probability": self.semantic_probability,
+            "semantic_margin": self.semantic_margin,
+            "break_accepted": self.break_accepted,
+            "break_confirmation_count": self.break_confirmation_count,
+            "completion_accepted": self.completion_accepted,
+            "completion_confirmation_count": self.completion_confirmation_count,
+            "semantic_endpoint_evaluated": self.semantic_endpoint_evaluated,
+            "decode_reason": self.decode_reason,
         }
 
 
@@ -148,6 +203,9 @@ class DuplexInputFSM:
         self.max_buffered_chunks = max_buffered_chunks
         self._candidate_audio: list[object] = []
         self._turn_audio: list[object] = []
+        self._silence_interval_started = time.time()
+        self._silence_interval_chunks = 0
+        self._session_id = ""
 
     @property
     def candidate_audio(self) -> tuple[object, ...]:
@@ -158,12 +216,53 @@ class DuplexInputFSM:
         return tuple(self._turn_audio)
 
     def reset(self) -> None:
+        self._flush_silence_interval(time.time(), reason="reset", session_id=self._session_id)
         self.state = InputState.SILENCE
         self._candidate_audio.clear()
         self._turn_audio.clear()
+        self._silence_interval_started = time.time()
+        self._silence_interval_chunks = 0
+
+    def close(self) -> None:
+        self._flush_silence_interval(time.time(), reason="close", session_id=self._session_id)
+
+    def record(self, output: FSMOutput, *, context: Mapping[str, object] | None = None) -> None:
+        request_id = str((context or {}).get("request_id") or "")
+        session_id = request_id.rsplit("-", 1)[0] if request_id.rsplit("-", 1)[-1].isdigit() else request_id
+        if session_id:
+            self._session_id = session_id
+        if output.previous_state == InputState.SILENCE:
+            if output.state == InputState.SILENCE:
+                self._silence_interval_chunks += 1
+                return
+            self._flush_silence_interval(output.timestamp, reason="state_change", session_id=session_id)
+        LOG.info("semantic_vad_transition %s", json.dumps(output.as_log(), sort_keys=True))
+        if output.state == InputState.SILENCE and output.previous_state != InputState.SILENCE:
+            self._silence_interval_started = output.timestamp
+            self._silence_interval_chunks = 0
+
+    def _flush_silence_interval(self, ended: float, *, reason: str, session_id: str = "") -> None:
+        if self._silence_interval_chunks <= 0:
+            return
+        LOG.info(
+            "semantic_vad_state_interval %s",
+            json.dumps({
+                "state": InputState.SILENCE.value,
+                "started": self._silence_interval_started,
+                "ended": ended,
+                "duration_ms": round((ended - self._silence_interval_started) * 1000, 3),
+                "audio_chunk_count": self._silence_interval_chunks,
+                "reason": reason,
+                "session_id": session_id,
+            }, sort_keys=True),
+        )
+        self._silence_interval_started = ended
+        self._silence_interval_chunks = 0
 
     @staticmethod
     def _chunks(audio_chunk: object) -> tuple[object, ...]:
+        if audio_chunk is None:
+            return ()
         if isinstance(audio_chunk, AudioChunkBatch):
             return audio_chunk.chunks
         return (audio_chunk,)
@@ -187,6 +286,7 @@ class DuplexInputFSM:
         event = InputEvent.NO_OP
         interrupt = False
         prefill_audio: tuple[object, ...] | None = None
+        decode_audio: tuple[object, ...] | None = None
         semantic_label = SemanticLabel.NOT_RUN
 
         if previous == InputState.SILENCE:
@@ -218,16 +318,26 @@ class DuplexInputFSM:
         elif previous == InputState.LISTEN:
             if item.complete is None:
                 raise ValueError("Listen requires complete")
-            semantic_label = VAEDDecision(item.complete).label
-            self._append(self._turn_audio, item.audio_chunk)
-            prefill_audio = self._chunks(item.audio_chunk)
-            if item.complete or not item.speech:
+            semantic_label = (
+                VAEDDecision(item.complete).label
+                if item.semantic_endpoint_evaluated
+                else SemanticLabel.NOT_RUN
+            )
+            chunks = self._chunks(item.audio_chunk)
+            if chunks:
+                self._append(self._turn_audio, item.audio_chunk)
+            if item.force_decode or item.complete:
+                prefill_audio = chunks or None
+                decode_audio = tuple(self._turn_audio)
                 self.state = InputState.SILENCE
                 event = InputEvent.DECODE
                 self._candidate_audio.clear()
                 self._turn_audio.clear()
-            else:
+            elif item.speech or item.semantic_endpoint_evaluated:
+                prefill_audio = chunks or None
                 event = InputEvent.CHUNK_PREFILL
+            else:
+                event = InputEvent.NO_OP
 
         else:
             raise ValueError(f"Invalid state: {previous!r}")
@@ -238,60 +348,182 @@ class DuplexInputFSM:
             event=event,
             interrupt=interrupt,
             prefill_audio=prefill_audio,
+            decode_audio=decode_audio,
             semantic_label=semantic_label,
             speech=bool(item.speech),
             break_decision=item.break_decision,
             reject=item.reject,
             complete=item.complete,
             timestamp=time.time(),
+            model_output=item.model_output,
+            semantic_command=item.semantic_command,
+            semantic_valid=item.semantic_valid,
+            request_kind=item.request_kind,
+            semantic_logprobs=item.semantic_logprobs,
+            semantic_probability=item.semantic_probability,
+            semantic_margin=item.semantic_margin,
+            break_accepted=item.break_accepted,
+            break_confirmation_count=item.break_confirmation_count,
+            completion_accepted=item.completion_accepted,
+            completion_confirmation_count=item.completion_confirmation_count,
+            semantic_endpoint_evaluated=item.semantic_endpoint_evaluated,
+            decode_reason=item.decode_reason,
         )
-        LOG.info("semantic_vad_transition %s", json.dumps(output.as_log(), sort_keys=True))
         return output
 
 
 class SemanticVADController:
     """Run only the semantic decision valid for the FSM's current state."""
 
-    def __init__(self, provider: SemanticVADProvider, *, max_buffered_chunks: int = 512) -> None:
+    def __init__(
+        self,
+        provider: SemanticVADProvider,
+        *,
+        max_buffered_chunks: int = 512,
+        break_probability_threshold: float = 0.8,
+        break_margin_threshold: float = 1.5,
+        break_confirmations: int = 1,
+        complete_probability_threshold: float = 0.9,
+        complete_margin_threshold: float = 2.0,
+        complete_confirmations: int = 1,
+    ) -> None:
         self.provider = provider
         self.fsm = DuplexInputFSM(max_buffered_chunks=max_buffered_chunks)
+        self.break_probability_threshold = break_probability_threshold
+        self.break_margin_threshold = break_margin_threshold
+        self.break_confirmations = break_confirmations
+        self.complete_probability_threshold = complete_probability_threshold
+        self.complete_margin_threshold = complete_margin_threshold
+        self.complete_confirmations = complete_confirmations
+        self._break_confirmation_count = 0
+        self._complete_confirmation_count = 0
+
+    def reset(self) -> None:
+        self.fsm.reset()
+        self._break_confirmation_count = 0
+        self._complete_confirmation_count = 0
 
     async def process(
         self,
         audio_chunk: object,
         *,
         speech: bool,
+        speech_stopped: bool = False,
+        force_decode: bool = False,
+        decode_reason: str | None = None,
         context: Mapping[str, object] | None = None,
     ) -> FSMOutput:
         semantic_context = context or {}
         if self.fsm.state == InputState.JUDGE:
+            self._complete_confirmation_count = 0
+            started = time.monotonic()
             decision = await self.provider.decide_break(
                 self.fsm.semantic_audio_with(audio_chunk),
                 context=semantic_context,
             )
-            return self.fsm.step(FSMInput(
+            qualifies = bool(
+                decision.break_decision
+                and not decision.reject
+                and (
+                    (decision.probability is None and decision.margin is None)
+                    or (
+                        decision.probability is not None
+                        and decision.margin is not None
+                        and decision.probability >= self.break_probability_threshold
+                        and decision.margin >= self.break_margin_threshold
+                    )
+                )
+            )
+            self._break_confirmation_count = self._break_confirmation_count + 1 if qualifies else 0
+            accepted = qualifies and self._break_confirmation_count >= self.break_confirmations
+            output = replace(self.fsm.step(FSMInput(
                 audio_chunk=audio_chunk,
                 speech=speech,
-                break_decision=decision.break_decision,
+                break_decision=accepted,
                 reject=decision.reject,
-            ))
+                model_output=decision.raw_output,
+                semantic_command=decision.command,
+                semantic_valid=decision.valid,
+                request_kind="VASD",
+                semantic_logprobs=decision.logprobs,
+                semantic_probability=decision.probability,
+                semantic_margin=decision.margin,
+                break_accepted=accepted,
+                break_confirmation_count=self._break_confirmation_count,
+            )), semantic_label=decision.label,
+                decision_latency_ms=(time.monotonic() - started) * 1000)
+            if accepted or output.state != InputState.JUDGE:
+                self._break_confirmation_count = 0
+            self.fsm.record(output, context=semantic_context)
+            return output
         if self.fsm.state == InputState.LISTEN:
-            if not speech:
-                return self.fsm.step(FSMInput(
-                    audio_chunk=audio_chunk,
+            if force_decode:
+                self._complete_confirmation_count = 0
+                output = self.fsm.step(FSMInput(
+                    audio_chunk=None,
                     speech=False,
                     complete=False,
+                    force_decode=True,
+                    decode_reason=decode_reason,
                 ))
+                self.fsm.record(output, context=semantic_context)
+                return output
+            if speech and not speech_stopped:
+                output = self.fsm.step(FSMInput(
+                    audio_chunk=audio_chunk,
+                    speech=True,
+                    complete=False,
+                    semantic_endpoint_evaluated=False,
+                ))
+                self.fsm.record(output, context=semantic_context)
+                return output
+            if not speech_stopped:
+                output = self.fsm.step(FSMInput(
+                    audio_chunk=None,
+                    speech=False,
+                    complete=False,
+                    semantic_endpoint_evaluated=False,
+                ))
+                self.fsm.record(output, context=semantic_context)
+                return output
+            started = time.monotonic()
             decision = await self.provider.decide_complete(
                 self.fsm.semantic_audio_with(audio_chunk),
                 context=semantic_context,
             )
-            return self.fsm.step(FSMInput(
+            qualifies = bool(
+                decision.complete
+                and decision.probability is not None
+                and decision.margin is not None
+                and decision.probability >= self.complete_probability_threshold
+                and decision.margin >= self.complete_margin_threshold
+            )
+            self._complete_confirmation_count = self._complete_confirmation_count + 1 if qualifies else 0
+            accepted = qualifies and self._complete_confirmation_count >= self.complete_confirmations
+            output = replace(self.fsm.step(FSMInput(
                 audio_chunk=audio_chunk,
                 speech=speech,
-                complete=decision.complete,
-            ))
-        return self.fsm.step(FSMInput(audio_chunk=audio_chunk, speech=speech))
+                complete=accepted,
+                model_output=decision.raw_output,
+                semantic_command=decision.command,
+                semantic_valid=decision.valid,
+                request_kind="VAED",
+                semantic_logprobs=decision.logprobs,
+                semantic_probability=decision.probability,
+                semantic_margin=decision.margin,
+                completion_accepted=accepted,
+                completion_confirmation_count=self._complete_confirmation_count,
+                semantic_endpoint_evaluated=True,
+                decode_reason="semantic_complete" if accepted else None,
+            )), decision_latency_ms=(time.monotonic() - started) * 1000)
+            if accepted:
+                self._complete_confirmation_count = 0
+            self.fsm.record(output, context=semantic_context)
+            return output
+        output = self.fsm.step(FSMInput(audio_chunk=audio_chunk, speech=speech))
+        self._break_confirmation_count = 0
+        self.fsm.record(output, context=semantic_context)
+        return output
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +533,13 @@ class SemanticVADConfig:
     silence_duration_ms: int = 500
     min_speech_duration_ms: int = 96
     max_buffered_chunks: int = 512
+    break_probability_threshold: float = 0.8
+    break_margin_threshold: float = 1.5
+    break_confirmations: int = 1
+    complete_probability_threshold: float = 0.9
+    complete_margin_threshold: float = 2.0
+    complete_confirmations: int = 1
+    incomplete_silence_timeout_ms: int = 8000
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> "SemanticVADConfig":
@@ -311,6 +550,13 @@ class SemanticVADConfig:
             "silence_duration_ms",
             "min_speech_duration_ms",
             "max_buffered_chunks",
+            "break_probability_threshold",
+            "break_margin_threshold",
+            "break_confirmations",
+            "complete_probability_threshold",
+            "complete_margin_threshold",
+            "complete_confirmations",
+            "incomplete_silence_timeout_ms",
         }
         unknown = sorted(set(value) - allowed)
         if unknown:
@@ -343,9 +589,66 @@ class SemanticVADConfig:
         max_chunks = value.get("max_buffered_chunks", 512)
         if not isinstance(max_chunks, int) or isinstance(max_chunks, bool) or max_chunks <= 0:
             raise ValueError("semantic_vad.max_buffered_chunks must be a positive integer")
+        break_probability = value.get("break_probability_threshold", 0.8)
+        if (
+            not isinstance(break_probability, int | float)
+            or isinstance(break_probability, bool)
+            or not math.isfinite(float(break_probability))
+            or not 0.0 <= float(break_probability) <= 1.0
+        ):
+            raise ValueError("semantic_vad.break_probability_threshold must be within [0, 1]")
+        break_margin = value.get("break_margin_threshold", 1.5)
+        if (
+            not isinstance(break_margin, int | float)
+            or isinstance(break_margin, bool)
+            or not math.isfinite(float(break_margin))
+            or float(break_margin) < 0
+        ):
+            raise ValueError("semantic_vad.break_margin_threshold must be non-negative")
+        break_confirmations = value.get("break_confirmations", 1)
+        if (
+            not isinstance(break_confirmations, int)
+            or isinstance(break_confirmations, bool)
+            or break_confirmations <= 0
+        ):
+            raise ValueError("semantic_vad.break_confirmations must be a positive integer")
+        complete_probability = value.get("complete_probability_threshold", 0.9)
+        if (
+            not isinstance(complete_probability, int | float)
+            or isinstance(complete_probability, bool)
+            or not math.isfinite(float(complete_probability))
+            or not 0.0 <= float(complete_probability) <= 1.0
+        ):
+            raise ValueError("semantic_vad.complete_probability_threshold must be within [0, 1]")
+        complete_margin = value.get("complete_margin_threshold", 2.0)
+        if (
+            not isinstance(complete_margin, int | float)
+            or isinstance(complete_margin, bool)
+            or not math.isfinite(float(complete_margin))
+            or float(complete_margin) < 0
+        ):
+            raise ValueError("semantic_vad.complete_margin_threshold must be non-negative")
+        confirmations = value.get("complete_confirmations", 1)
+        if not isinstance(confirmations, int) or isinstance(confirmations, bool) or confirmations <= 0:
+            raise ValueError("semantic_vad.complete_confirmations must be a positive integer")
+        incomplete_timeout = value.get("incomplete_silence_timeout_ms", 8000)
+        if (
+            not isinstance(incomplete_timeout, int | float)
+            or isinstance(incomplete_timeout, bool)
+            or not math.isfinite(float(incomplete_timeout))
+            or float(incomplete_timeout) < 0
+        ):
+            raise ValueError("semantic_vad.incomplete_silence_timeout_ms must be non-negative")
         return cls(
             threshold=float(threshold),
             max_buffered_chunks=max_chunks,
+            break_probability_threshold=float(break_probability),
+            break_margin_threshold=float(break_margin),
+            break_confirmations=break_confirmations,
+            complete_probability_threshold=float(complete_probability),
+            complete_margin_threshold=float(complete_margin),
+            complete_confirmations=confirmations,
+            incomplete_silence_timeout_ms=int(incomplete_timeout),
             **numbers,
         )
 
@@ -382,9 +685,18 @@ class SemanticRealtimeAdapter:
     ) -> None:
         self.config = config
         self._prefix_audio: list[dict[str, object]] = []
+        self.last_avad: dict[str, object] = {}
+        self._semantic_waiting = False
+        self._incomplete_silence_started: float | None = None
         self.controller = SemanticVADController(
             provider,
             max_buffered_chunks=config.max_buffered_chunks,
+            break_probability_threshold=config.break_probability_threshold,
+            break_margin_threshold=config.break_margin_threshold,
+            break_confirmations=config.break_confirmations,
+            complete_probability_threshold=config.complete_probability_threshold,
+            complete_margin_threshold=config.complete_margin_threshold,
+            complete_confirmations=config.complete_confirmations,
         )
         if vad is None:
             from vllm_omni.engine.duplex.vad import (
@@ -404,11 +716,16 @@ class SemanticRealtimeAdapter:
         self.vad = vad
 
     def reset(self) -> None:
-        self.controller.fsm.reset()
+        self.controller.reset()
         self._prefix_audio.clear()
+        self._semantic_waiting = False
+        self._incomplete_silence_started = None
         reset = getattr(self.vad, "reset", None)
         if callable(reset):
             reset()
+
+    def close(self) -> None:
+        self.controller.fsm.close()
 
     def _remember_prefix(self, chunk: dict[str, object]) -> None:
         self._prefix_audio.append(chunk)
@@ -440,6 +757,48 @@ class SemanticRealtimeAdapter:
             fmt=audio_format,
             sample_rate_hz=sample_rate,
         )
+        self.last_avad = {
+            "is_speech": bool(getattr(vad_result, "is_speech", vad_result.speech_active)),
+            "speech_active": bool(vad_result.speech_active),
+            "speech_started": bool(getattr(vad_result, "speech_started", False)),
+            "speech_stopped": bool(getattr(vad_result, "speech_stopped", False)),
+            "speech_probability": float(getattr(vad_result, "speech_probability", 0.0)),
+            "semantic_waiting": self._semantic_waiting,
+            "incomplete_silence_elapsed_ms": (
+                0.0
+                if self._incomplete_silence_started is None
+                else (time.monotonic() - self._incomplete_silence_started) * 1000
+            ),
+        }
+        if self._semantic_waiting and vad_result.speech_active:
+            self._semantic_waiting = False
+            self._incomplete_silence_started = None
+            self.last_avad["semantic_waiting"] = False
+            self.last_avad["incomplete_silence_elapsed_ms"] = 0.0
+        if (
+            self._semantic_waiting
+            and not vad_result.speech_active
+            and self._incomplete_silence_started is not None
+            and self.config.incomplete_silence_timeout_ms > 0
+            and (time.monotonic() - self._incomplete_silence_started) * 1000
+            >= self.config.incomplete_silence_timeout_ms
+        ):
+            output = await self.controller.process(
+                None,
+                speech=False,
+                force_decode=True,
+                decode_reason="incomplete_silence_timeout",
+                context=context,
+            )
+            self._semantic_waiting = False
+            self._incomplete_silence_started = None
+            self.last_avad["semantic_waiting"] = False
+            commands = [{
+                "type": "input_audio_buffer.commit",
+                "final": True,
+                "create_response": True,
+            }]
+            return output, commands
         state_before = self.controller.fsm.state
         controller_chunk: object = chunk
         if state_before == InputState.SILENCE and vad_result.speech_active and self._prefix_audio:
@@ -448,8 +807,18 @@ class SemanticRealtimeAdapter:
         output = await self.controller.process(
             controller_chunk,
             speech=vad_result.speech_active,
+            speech_stopped=bool(getattr(vad_result, "speech_stopped", False)),
             context=context,
         )
+        if output.semantic_endpoint_evaluated and not output.completion_accepted:
+            self._semantic_waiting = True
+            self._incomplete_silence_started = time.monotonic()
+            self.last_avad["semantic_waiting"] = True
+            self.last_avad["incomplete_silence_elapsed_ms"] = 0.0
+        elif output.event == InputEvent.DECODE:
+            self._semantic_waiting = False
+            self._incomplete_silence_started = None
+            self.last_avad["semantic_waiting"] = False
         if (
             state_before == InputState.SILENCE
             and output.state == InputState.SILENCE
@@ -487,18 +856,25 @@ def _chunk_duration_ms(chunk: Mapping[str, object]) -> float:
     return byte_count / sample_width * 1000.0 / float(sample_rate)
 
 
-_VASD_SYSTEM = """You are the semantic interruption classifier for a duplex voice assistant.
-Listen to the candidate user audio and output exactly one label:
-<b> if it contains meaningful speech that should interrupt the assistant;
-</b> if it has understandable meaning but should not interrupt;
-REJECT if it has no acceptable semantic content, such as noise or unintelligible audio.
-Do not explain your answer."""
+_VASD_CODES = {"A": BREAK_TOKEN, "B": NO_BREAK_TOKEN, "C": SemanticLabel.REJECT.value}
+_VAED_CODES = {"A": COMPLETE_TOKEN, "B": INCOMPLETE_TOKEN}
+_CODE_TOKEN_IDS = {"A": 32, "B": 33, "C": 34}
 
-_VAED_SYSTEM = """You are the semantic endpoint classifier for a duplex voice assistant.
-Listen to the current user utterance and output exactly one label:
-<c> if the user's meaning is complete and the assistant may answer;
-</c> if the user is still speaking an incomplete thought.
-Do not explain your answer."""
+DEFAULT_VASD_PROMPT = """你是双工语音助手的语义打断分类器。请根据候选用户音频，只输出一个分类码：
+A：用户正在对助手表达有意义的请求或问题，应当打断助手，对应 <b>；
+B：音频内容可以理解，但不应打断助手，对应 </b>；
+C：没有可接受的有效语义，例如环境噪声或无法辨认的声音，对应 REJECT。
+只能输出 A、B 或 C，不得解释。"""
+
+DEFAULT_VAED_PROMPT = """你是双工语音助手的语义结束分类器。请根据当前累计的用户音频，只输出一个分类码：
+A：用户语义已经完整，助手可以开始回答，对应 <c>；
+B：用户仍在表达未完成的意思，需要继续聆听，对应 </c>。
+只能输出 A 或 B，不得解释。"""
+
+DEFAULT_CHAT_PROMPT = """你是一个实时语音对话助手。请直接理解用户音频并回答用户的问题。
+回复应自然、简洁、口语化，优先使用一到三句话；不要输出 Markdown，不要展示思考过程。
+始终使用用户所使用的语言回答。"""
+CHAT_AUDIO_INSTRUCTION = "这是用户对你的提问。请直接回答问题，不要转写、复述或描述这段音频。"
 
 
 class MiMoSemanticVADProvider:
@@ -510,27 +886,38 @@ class MiMoSemanticVADProvider:
         self.model = model
 
     async def decide_break(self, audio_chunks, *, context):
-        content = await self._classify(audio_chunks, system=_VASD_SYSTEM, request_kind="vasd", context=context)
-        labels = _labels(content, (BREAK_TOKEN, NO_BREAK_TOKEN, SemanticLabel.REJECT.value))
-        if labels == [BREAK_TOKEN]:
-            return VASDDecision(True, False)
-        if labels == [NO_BREAK_TOKEN]:
-            return VASDDecision(False, False)
-        if labels == [SemanticLabel.REJECT.value]:
-            return VASDDecision(False, True)
-        raise ValueError(f"Invalid VASD output: {content!r}")
+        result = await self._classify(
+            audio_chunks,
+            system=_prompt_from_context(context, "vasd_prompt", DEFAULT_VASD_PROMPT),
+            request_kind="VASD",
+            code_map=_VASD_CODES,
+            context=context,
+        )
+        command = result["command"]
+        if command == BREAK_TOKEN:
+            return VASDDecision(True, False, result["raw_output"], command, True,
+                                result["logprobs"], result["probability"], result["margin"])
+        if command == NO_BREAK_TOKEN:
+            return VASDDecision(False, False, result["raw_output"], command, True,
+                                result["logprobs"], result["probability"], result["margin"])
+        return VASDDecision(False, True, result["raw_output"], command, True,
+                            result["logprobs"], result["probability"], result["margin"])
 
     async def decide_complete(self, audio_chunks, *, context):
-        content = await self._classify(audio_chunks, system=_VAED_SYSTEM, request_kind="vaed", context=context)
-        labels = _labels(content, (COMPLETE_TOKEN, INCOMPLETE_TOKEN))
-        if labels == [COMPLETE_TOKEN]:
-            return VAEDDecision(True)
-        if labels == [INCOMPLETE_TOKEN]:
-            return VAEDDecision(False)
-        raise ValueError(f"Invalid VAED output: {content!r}")
+        result = await self._classify(
+            audio_chunks,
+            system=_prompt_from_context(context, "vaed_prompt", DEFAULT_VAED_PROMPT),
+            request_kind="VAED",
+            code_map=_VAED_CODES,
+            context=context,
+        )
+        command = result["command"]
+        return VAEDDecision(command == COMPLETE_TOKEN, result["raw_output"], command, True,
+                            result["logprobs"], result["probability"], result["margin"])
 
-    async def _classify(self, audio_chunks, *, system, request_kind, context):
+    async def _classify(self, audio_chunks, *, system, request_kind, code_map, context):
         wav = audio_chunks_to_wav(audio_chunks)
+        token_ids = [_CODE_TOKEN_IDS[code] for code in code_map]
         payload = {
             "model": self.model,
             "messages": [
@@ -543,39 +930,197 @@ class MiMoSemanticVADProvider:
                     },
                 }]},
             ],
-            "max_tokens": 8,
+            "max_tokens": 1,
             "temperature": 0.0,
             "stream": False,
+            "logprobs": True,
+            "top_logprobs": 0,
+            "logprob_token_ids": token_ids,
+            "allowed_token_ids": token_ids,
             "chat_template_kwargs": {"enable_thinking": False},
         }
         request_id = str(context.get("request_id") or f"semantic-vad-{time.time_ns()}")
         async with self.client.post(
             self.mimo_url + "/v1/chat/completions",
             json=payload,
-            headers={"X-Request-Id": f"{request_id}-{request_kind}"},
+            headers={"X-Request-Id": f"{request_id}-{request_kind.lower()}"},
         ) as response:
             body = await response.json(content_type=None)
             if response.status != 200:
                 raise RuntimeError(f"MiMo semantic VAD HTTP {response.status}")
         try:
-            content = body["choices"][0]["message"]["content"]
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
+            position = choice["logprobs"]["content"][0]
+            candidates = position["top_logprobs"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("MiMo semantic VAD returned no classifier content") from exc
+            raise ValueError("MiMo semantic VAD returned no usable classifier logprobs") from exc
         if not isinstance(content, str):
             raise ValueError("MiMo semantic VAD classifier content must be text")
-        return content.strip()
+        code_logprobs = {
+            item["token"]: float(item["logprob"])
+            for item in candidates
+            if isinstance(item, dict) and item.get("token") in code_map
+        }
+        if set(code_logprobs) != set(code_map):
+            raise ValueError(
+                f"MiMo semantic VAD logprobs missing candidates: expected {sorted(code_map)}, "
+                f"got {sorted(code_logprobs)}"
+            )
+        selected_code = max(code_logprobs, key=code_logprobs.get)
+        raw_output = content
+        sampled_code = content.strip()
+        if sampled_code not in code_map:
+            raise InvalidSemanticCommand(request_kind, content, tuple(code_map.values()))
+        if sampled_code != selected_code:
+            raise ValueError(
+                f"MiMo semantic VAD sampled code {sampled_code!r} differs from logprob argmax {selected_code!r}"
+            )
+        canonical_logprobs = {code_map[code]: value for code, value in code_logprobs.items()}
+        ordered = sorted(code_logprobs.values(), reverse=True)
+        maximum = ordered[0]
+        denominator = sum(math.exp(value - maximum) for value in ordered)
+        probability = 1.0 / denominator
+        margin = ordered[0] - ordered[1] if len(ordered) > 1 else math.inf
+        command = code_map[selected_code]
+        LOG.info(
+            "mimo_semantic_logprobs request_id=%s kind=%s code=%s command=%s "
+            "probability=%.6f margin=%.6f logprobs=%s",
+            request_id,
+            request_kind,
+            selected_code,
+            command,
+            probability,
+            margin,
+            json.dumps(canonical_logprobs, sort_keys=True),
+        )
+        return {
+            "raw_output": selected_code,
+            "command": command,
+            "logprobs": canonical_logprobs,
+            "probability": probability,
+            "margin": margin,
+        }
 
 
-def _labels(content: str, allowed: Sequence[str]) -> list[str]:
-    upper = content.upper()
-    found: list[tuple[int, str]] = []
-    for label in allowed:
-        source = upper if label == SemanticLabel.REJECT.value else content
-        target = label if source is content else label.upper()
-        for match in re.finditer(re.escape(target), source):
-            found.append((match.start(), label))
-    found.sort()
-    return [label for _, label in found]
+def _prompt_from_context(context: Mapping[str, object], key: str, default: str) -> str:
+    value = context.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, str) or not value.strip() or len(value) > 4096:
+        raise ValueError(f"{key} must be a non-empty string of at most 4096 characters")
+    return value
+
+
+class MiMoChatProvider:
+    """Stream text replies from the same MiMo backbone after an FSM DECODE."""
+
+    def __init__(self, client, mimo_url: str, *, model: str = "mimo-v2.6-flash") -> None:
+        self.client = client
+        self.mimo_url = mimo_url.rstrip("/")
+        self.model = model
+
+    async def stream_reply(self, audio_chunks, *, history, prompt, context):
+        system = _prompt_from_context({"chat_prompt": prompt}, "chat_prompt", DEFAULT_CHAT_PROMPT)
+        messages: list[dict[str, object]] = [{"role": "system", "content": system}]
+        for turn in history[-4:]:
+            audio_data = turn.get("audio_wav") if isinstance(turn, Mapping) else None
+            assistant = turn.get("assistant") if isinstance(turn, Mapping) else None
+            if isinstance(audio_data, str) and audio_data:
+                messages.append({"role": "user", "content": [
+                    _chat_audio_part(audio_data),
+                    {"type": "text", "text": CHAT_AUDIO_INSTRUCTION},
+                ]})
+            if isinstance(assistant, str) and assistant:
+                messages.append({"role": "assistant", "content": assistant})
+        wav = audio_chunks_to_wav(audio_chunks)
+        if len(wav) > 3 * 1024 * 1024:
+            raise ValueError("Chat audio exceeds 3 MiB")
+        wav_b64 = base64.b64encode(wav).decode("ascii")
+        messages.append({"role": "user", "content": [
+            _chat_audio_part(wav_b64),
+            {"type": "text", "text": CHAT_AUDIO_INSTRUCTION},
+        ]})
+        request_id = str(context.get("request_id") or f"semantic-chat-{time.time_ns()}")
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": 512,
+            "temperature": 0.0,
+            "stream": True,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        async with self.client.post(
+            self.mimo_url + "/v1/chat/completions",
+            json=payload,
+            headers={"X-Request-Id": f"{request_id}-chat"},
+        ) as response:
+            if response.status != 200:
+                body = await response.read()
+                raise RuntimeError(f"MiMo Chat HTTP {response.status}: {body[:200]!r}")
+            finish_reason = None
+            async for data in _sse_data(response.content):
+                if data == "[DONE]":
+                    if finish_reason is None:
+                        raise RuntimeError("MiMo Chat ended without finish_reason")
+                    return
+                event = json.loads(data)
+                if not isinstance(event, dict) or event.get("error"):
+                    raise RuntimeError("MiMo Chat returned an error event")
+                for choice in event.get("choices", []):
+                    delta = choice.get("delta", {})
+                    text = delta.get("content")
+                    if isinstance(text, str) and text:
+                        yield text
+                    reason = choice.get("finish_reason")
+                    if reason is not None:
+                        finish_reason = reason
+            raise RuntimeError("MiMo Chat disconnected before DONE")
+
+
+def _chat_audio_part(wav_b64: str) -> dict[str, object]:
+    return {
+        "type": "input_audio",
+        "input_audio": {"data": wav_b64, "format": "wav"},
+    }
+
+
+async def _sse_data(stream):
+    fields: list[str] = []
+    async for raw in stream:
+        line = raw.decode("utf-8").rstrip("\r\n")
+        if not line:
+            if fields:
+                yield "\n".join(fields)
+                fields.clear()
+        elif line.startswith("data:"):
+            fields.append(line[5:].removeprefix(" "))
+    if fields:
+        raise RuntimeError("MiMo Chat SSE ended inside an event")
+
+
+class InvalidSemanticCommand(ValueError):
+    def __init__(self, kind: str, raw_output: str, allowed: Sequence[str]) -> None:
+        self.kind = kind
+        self.raw_output = raw_output
+        self.normalized = raw_output.strip()
+        self.allowed = tuple(allowed)
+        super().__init__(
+            f"Invalid {kind} command {self.normalized!r}; expected exactly one of {self.allowed!r}"
+        )
+
+
+def _strict_command(content: str, allowed: Sequence[str], kind: str) -> str:
+    normalized = content.strip()
+    if normalized not in allowed:
+        LOG.error(
+            "mimo_semantic_output_invalid kind=%s raw=%s allowed=%s",
+            kind,
+            json.dumps(content, ensure_ascii=True),
+            list(allowed),
+        )
+        raise InvalidSemanticCommand(kind, content, allowed)
+    return normalized
 
 
 def audio_chunks_to_wav(audio_chunks: Sequence[object]) -> bytes:

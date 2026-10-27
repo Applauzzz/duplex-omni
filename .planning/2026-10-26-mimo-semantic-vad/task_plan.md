@@ -6,11 +6,13 @@ using acoustic VAD plus Omni-backed VASD/VAED interfaces to emit ordered
 PREFILL, CHUNK_PREFILL and DECODE events without changing the specified FSM.
 
 ## Next Step
-Create and publish the first `feature/SVAD` checkpoint, then run isolated real
-MiMo VASD/VAED audio classification for latency and decision-quality evidence.
+Run user browser acceptance against `svad12` with the Beijing pause/resume
+example. Confirm the first endpoint returns `</c>` and remains Listen, resumed
+speech stays in the same turn, and a later accepted `<c>` triggers one DECODE.
+Do not commit or push until the user accepts the behavior.
 
 ## Current Phase
-Phase 1: Requirements and architecture discovery.
+Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
 
 ## Phases
 
@@ -44,9 +46,20 @@ Phase 1: Requirements and architecture discovery.
 - **Status:** complete
 
 ### Phase 5: Integration Acceptance And Publication
-- [ ] Run isolated real MiMo VASD/VAED classification and latency validation
-- [ ] Document actual commands, artifacts, skips and remaining model-quality gaps
-- [ ] Review branch diff and publish `feature/SVAD`
+- [x] Add live FSM/AVAD/semantic decision visualization and transition timeline
+- [x] Launch only MiMo plus the isolated SVAD debug service; keep TTS stopped
+- [ ] Complete browser microphone and decision-quality acceptance with the user
+- [x] Document actual commands, artifacts, skips and remaining model-quality gaps
+- [x] Publish `feature/SVAD` after explicit user authorization of the current feature snapshot
+- **Status:** in_progress
+
+### Phase 6: FSM-Driven MiMo Text Conversation
+- [x] Expose complete accepted-turn audio on DECODE without changing FSM rules
+- [x] Stream MiMo text replies with bounded multimodal conversation history
+- [x] Cancel an active Chat request on a new effective BREAK
+- [x] Add a right-side conversation panel to the existing visualization
+- [x] Expose editable VASD, VAED and Chat prompts per WebSocket session
+- [x] Verify semantic classification remains independent from Chat generation
 - **Status:** in_progress
 
 ## Decisions Made
@@ -59,6 +72,15 @@ Phase 1: Requirements and architecture discovery.
 | Preserve current realtime path behind configuration | Stage 3 is the regression baseline while semantic VAD is introduced |
 | Keep Stage 4 implementation parent-owned | Policy, HTTP adapters, deployment and tests belong in the parent; the stable runner is consumed as a downstream scheduler |
 | Map semantic PREFILL/CHUNK_PREFILL onto buffered runner append | Current MiMo port supports committed whole turns, not native incremental KV; preserve event semantics without overstating engine capability |
+| Isolate the acceptance service from TTS and response generation | This stage must localize failures to AVAD, semantic classification or FSM transitions |
+| Visualize every state transition and decision latency | User requested browser-visible acceptance and debugging before publication |
+| Trigger Chat only from DECODE | Keeps inference downstream of the authoritative FSM rather than duplicating endpointing policy |
+| Cancel Chat on effective BREAK | Matches duplex interruption semantics while preserving the existing semantic gate |
+| Keep prompts session-local and editable | Enables prompt experiments without mutating model files or global service state |
+| Trigger VAED only on acoustic endpoint | Prevents grammatically complete speech prefixes from being decoded while the user is still speaking |
+| Allow Listen to span semantic-incomplete silence | Supports `[</c>, </s>]` followed by resumed speech in the same user turn |
+| Use an external incomplete-silence timeout | Prevents an incomplete semantic turn from waiting forever without adding a fourth FSM state |
+| Publish the current snapshot with browser long-utterance acceptance still open | User explicitly requested commit and push; preserve the open acceptance item rather than claiming it passed |
 
 ## Errors Encountered
 | Error | Resolution |

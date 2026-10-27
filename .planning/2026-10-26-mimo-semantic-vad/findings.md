@@ -49,6 +49,17 @@
 | Require explicit `semantic_vad` session mode | Legacy `server_vad` and manual commit behavior remain unchanged |
 | Treat runner append as an aggregation adapter | It delivers exact audio/event boundaries but only invokes MiMo after final commit |
 | Keep MiMo classification sequential per connection for the first checkpoint | Preserves decision order; measured GPU latency is required before introducing speculative/concurrent policy |
+| Use constrained internal single-token codes for logprob classification | Normative `<b>/</b>/<c>/</c>/REJECT` labels tokenize to 2-3 tokens. A/B/C are existing single tokens (IDs32/33/34); `allowed_token_ids` and `logprob_token_ids` provide an exact one-position distribution without checkpoint/tokenizer mutation |
+| Preserve normative tokens at the FSM boundary | Internal A/B/C are transport codes only; logs/UI map their logprobs back to `<b>`, `</b>`, `REJECT`, `<c>`, `</c>` |
+| Persist Silence as intervals | Per-chunk Silence INFO created 20ms log floods; one interval summary preserves duration/chunk evidence with much lower volume |
+| Run VAED only on AVAD speech-stop edges | Active-prefix VAED can mark a grammatically complete prefix as finished before the user has stopped speaking |
+| Preserve Listen across `</c>` pauses | A semantic-incomplete acoustic endpoint is a continuation point, not a new Judge turn |
+| Count optional confirmations across endpoints | Clearing confirmation count on resumed speech makes `complete_confirmations > 1` impossible in endpoint mode |
+| Reconfigure settings by rebuilding the session adapter | AVAD and FSM configuration is constructor-owned; rebuilding avoids partial hot-update state while keeping one browser/WebSocket session |
+| Read local JSON defaults per request | Allows server-local parameter and prompt edits to appear after browser refresh without restarting model or UI services |
+| VASD BREAK is currently unthresholded and asymmetric | Any argmax `<b>` immediately leaves Judge, including observed probability0.543/margin0.25, while `</b>` must keep winning every cumulative-prefix request; recent missing NO_BREAK is prompt/policy bias, not a broken B token path |
+| Gate BREAK symmetrically with COMPLETE | Preserve model `<b>` telemetry but require configurable probability, margin and consecutive-prefix confirmations before FSM receives effective break=1 |
+| Define browser chunk size as a minimum target interval | A single in-flight semantic request can delay dispatch, so exact fixed-duration chunks are impossible without concurrent requests or dropping audio; expose `audio_chunk_ms` and merge delayed audio |
 
 ## Issues Encountered
 | Issue | Resolution |

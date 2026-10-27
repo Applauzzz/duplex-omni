@@ -16,12 +16,16 @@ import time
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run", type=Path, required=True)
-    parser.add_argument("--role", choices=["tts", "mimo", "tts-ui", "mimo-tts-ui", "mimo-realtime-ui"], required=True)
+    parser.add_argument(
+        "--role",
+        choices=["tts", "mimo", "tts-ui", "mimo-tts-ui", "mimo-realtime-ui", "svad-ui"],
+        required=True,
+    )
     parser.add_argument("--attempt", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--ui-host", default="127.0.0.1")
     args = parser.parse_args()
-    is_ui = args.role in ("tts-ui", "mimo-tts-ui", "mimo-realtime-ui")
+    is_ui = args.role in ("tts-ui", "mimo-tts-ui", "mimo-realtime-ui", "svad-ui")
     if not is_ui and args.ui_host != "127.0.0.1":
         parser.error("--ui-host applies only to UI roles; model APIs stay loopback.")
     run = args.run.resolve()
@@ -35,6 +39,8 @@ def main():
             script = Path(__file__).parents[1] / "20261025_mimo_tts_integration/server.py"
         elif args.role == "mimo-realtime-ui":
             script = Path(__file__).parents[1] / "20261025_mimo_tts_integration/realtime_server.py"
+        elif args.role == "svad-ui":
+            script = Path(__file__).parents[1] / "20261025_mimo_tts_integration/svad_debug_server.py"
         command = [
             sys.executable, "-B", str(script),
             "--host", host, "--port", str(args.port),

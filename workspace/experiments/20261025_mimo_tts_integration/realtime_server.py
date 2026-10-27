@@ -208,6 +208,8 @@ async def realtime(request):
             await manager.handle(CloseDuplexSessionMessage(
                 control_id=uuid.uuid4().hex, session_id=sid, reason="disconnect"))
         finally:
+            if semantic_vad is not None:
+                semantic_vad.close()
             await port.shutdown()
             await manager.shutdown()
             request.app["active_sessions"].discard(sid)

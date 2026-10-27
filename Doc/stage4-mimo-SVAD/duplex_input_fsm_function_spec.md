@@ -1,6 +1,6 @@
 # Duplex Input FSM：AVAD + Semantic VAD 功能规格说明
 
-> 版本：v0.1（按当前方案实现，不进行架构扩展）
+> 版本：v0.2（VAED 改为声学终点触发，Listen 可跨语义未完成的静音）
 > 用途：提供给 Omni模型 作为输入控制模块的实现与验收依据。
 > 参考：`speech_fsm_en.pdf`（Speech interaction: VAD FSM and inference behavior）及补充的 Reject 需求。
 
@@ -86,10 +86,14 @@ reject = 0：未拒识；继续按 break 判定处理。
 
 ### 4.3 `Listen`
 
-- **职责**：在已确认打断后持续接收音频，并判断语义完成。
-- **运行模块**：AVAD + VAED。
-- **状态行为**：当 `complete=0 ∧ speech=1`，保持 `Listen` 并发出 `CHUNK_PREFILL`；当 `complete=1 ∨ speech=0`，转入 `Silence` 并发出 `DECODE`。
-- **注意**：严格沿用原图定义，**`Listen` 中只要 `speech=0` 就触发返回 `Silence` / `DECODE`，本期不增加静音等待时间或其他延迟策略**。
+- **职责**：在已确认打断后持续接收完整用户轮次，并在声学停顿点判断语义是否完成。
+- **运行模块**：AVAD 持续运行；VAED 只在 AVAD 从 active 变为 stopped 的下降沿运行。
+- **语音进行中**：`speech=1` 时不运行 VAED，保持 `Listen`，新增音频触发 `CHUNK_PREFILL`。
+- **声学停顿**：`speech_stopped=1` 时，将当前轮次的全部累计音频一次性送入 VAED。
+- **语义未完成**：`complete=0 ∧ speech=0` 时保持 `Listen`，允许跨越静音等待用户继续，不触发 Decode。
+- **恢复说话**：语义未完成的等待期间重新出现 `speech=1`，继续同一轮 `Listen` 和 `CHUNK_PREFILL`，不重新运行 VASD。
+- **语义完成**：只有 VAED 的有效 `complete=1` 才转入 `Silence` 并发出 `DECODE`。
+- **超时兜底**：VAED 返回未完成后持续静音超过外部配置的等待时间，可由运行策略触发 `DECODE`；超时不是第四个 FSM 状态。
 
 ## 5. 状态转移表（实现的唯一权威规则）
 
@@ -100,10 +104,14 @@ reject = 0：未拒识；继续按 break 判定处理。
 | `Judge` | `reject=0 ∧ break=1` | `Listen` | `PREFILL`；通知下游打断当前回复 |
 | `Judge` | 有效 `break=0 ∧ speech=1` | `Judge` | `NO_OP`；继续判断 |
 | `Judge` | 有效 `break=0 ∧ speech=0` | `Silence` | `NO_OP`；结束当前候选输入 |
-| `Listen` | `complete=0 ∧ speech=1` | `Listen` | `CHUNK_PREFILL` |
-| `Listen` | `complete=1 ∨ speech=0` | `Silence` | `DECODE` |
+| `Listen` | `speech=1`（普通语音块） | `Listen` | `CHUNK_PREFILL`；不运行 VAED |
+| `Listen` | `speech_stopped=1 ∧ complete=0` | `Listen` | `CHUNK_PREFILL` 当前终点块；跨静音等待 |
+| `Listen` | `speech=0 ∧ 已判断 complete=0` | `Listen` | `NO_OP`；不重复运行 VAED |
+| `Listen` | 等待期间重新 `speech=1` | `Listen` | `CHUNK_PREFILL`；继续同一轮 |
+| `Listen` | `speech_stopped=1 ∧ complete=1` | `Silence` | `DECODE` |
+| `Listen` | 语义未完成静音达到外部超时 | `Silence` | `DECODE`（外部兜底策略） |
 
-说明：在表中，“有效 `break=0`”包含 `reject=1` 造成的 `break=0`，以及未拒识且原始 `break=0`。`Judge` 按 **Break 优先** 判断；`Listen` 按 `complete=1 ∨ speech=0` 结束判断。
+说明：在表中，“有效 `break=0`”包含 `reject=1` 造成的 `break=0`，以及未拒识且原始 `break=0`。`Judge` 按 **Break 优先** 判断。`Listen` 不再把普通 `speech=0` 直接等价为轮次结束；VAED 的完整轮次判断决定是否结束。
 
 ```mermaid
 stateDiagram-v2
@@ -113,8 +121,11 @@ stateDiagram-v2
     Judge --> Listen: reject=0 & break=1 / PREFILL + interrupt
     Judge --> Judge: effective_break=0 & speech=1
     Judge --> Silence: effective_break=0 & speech=0
-    Listen --> Listen: complete=0 & speech=1 / CHUNK_PREFILL
-    Listen --> Silence: complete=1 OR speech=0 / DECODE
+    Listen --> Listen: speech=1 / CHUNK_PREFILL
+    Listen --> Listen: speech_stopped & complete=0 / wait continuation
+    Listen --> Listen: speech resumes / CHUNK_PREFILL
+    Listen --> Silence: speech_stopped & complete=1 / DECODE
+    Listen --> Silence: incomplete-silence timeout / DECODE
 ```
 
 ## 6. 对推理系统的控制语义
@@ -125,8 +136,8 @@ FSM 只**发出事件**，不在状态机内部实现 GPU 调度、KV Cache 修�
 |---|---|---|
 | `NO_OP` | 维持或退出没有有效打断的检测阶段 | 不因该事件改变当前模型推理流程 |
 | `PREFILL` | `Judge → Listen`，且有效 `break=1` | 发出打断指令；将已接收的当前有效输入送入 Prefill |
-| `CHUNK_PREFILL` | `Listen` 中 `complete=0 ∧ speech=1` | 将新增音频 Chunk 送入增量 Prefill |
-| `DECODE` | `Listen → Silence`，由 `complete=1 ∨ speech=0` 触发 | 通知下游开始回复决策与 Decode 阶段 |
+| `CHUNK_PREFILL` | `Listen` 中收到新增语音，或收到第一次语义未完成的声学终点块 | 将新增音频 Chunk 送入增量 Prefill |
+| `DECODE` | `Listen → Silence`，由声学终点上的有效 `complete=1` 或外部静音超时触发 | 通知下游开始回复决策与 Decode 阶段 |
 
 在 `Silence` 和未确认 `break=1` 的 `Judge` 阶段，FSM 不发出停止生成指令。只有 `break=1` 才使下游接到打断指令。
 
@@ -227,9 +238,11 @@ def fsm_step(state, speech, break_decision=None, reject=None, complete=None):
 
     if state == "Listen":
         assert complete is not None
-        if complete or not speech:
+        if complete:
             return "Silence", "DECODE", False
-        return "Listen", "CHUNK_PREFILL", False
+        if speech or semantic_endpoint_evaluated:
+            return "Listen", "CHUNK_PREFILL", False
+        return "Listen", "NO_OP", False
 
     raise ValueError(f"Invalid state: {state}")
 ```
@@ -247,12 +260,15 @@ def fsm_step(state, speech, break_decision=None, reject=None, complete=None):
 | T05 | T04 后 `speech=0` | 返回 `Silence`，丢弃未提交的缓存 |
 | T06 | `Judge` 中 `break=1, reject=0` | 转入 `Listen`，只触发一次初始 `PREFILL` 与打断 |
 | T07 | `Listen` 中 `speech=1, complete=0` | 保持 `Listen`，新增音频 Chunk 触发 `CHUNK_PREFILL` |
-| T08 | `Listen` 中 `speech=1, complete=1` | 返回 `Silence`，触发 `DECODE` |
-| T09 | `Listen` 中 `speech=0, complete=0` | **仍立即**返回 `Silence` 并触发 `DECODE` |
+| T08 | `Listen` 中普通 `speech=1` | 不运行 VAED，保持 `Listen` 并触发 `CHUNK_PREFILL` |
+| T09 | AVAD `speech_stopped=1`，完整累计音频 VAED 输出 `complete=0` | 保持 `Listen`，跨静音等待，不触发 Decode |
 | T10 | `Judge` 中出现 `break=1, reject=1` | Reject 覆盖 Break，不打断、不 Prefill |
 | T11 | 同一音频 Chunk 已经用于初始 `PREFILL` | 不得再次放入 `CHUNK_PREFILL` |
 | T12 | 下游 `p(speak)>τ` | 使用候选 token 继续生成非空回复 |
 | T13 | 下游 `p(speak)≤τ` | 直接 EOS，回复正文为空 |
+| T14 | T09 后用户恢复 `speech=1` | 继续同一轮 `Listen` 和 `CHUNK_PREFILL`，不经过 Judge |
+| T15 | 后续 `speech_stopped=1, complete=1` | 返回 `Silence`，触发 `DECODE` |
+| T16 | `complete=0` 后持续静音达到配置超时 | 外部策略触发 `DECODE`，无新增 FSM 状态 |
 
 ## 10. 日志与可观测性
 
@@ -293,7 +309,7 @@ prefill_audio_chunk_count
 **本期不实现/不改变：**
 
 - 不增加 `Reject` 状态，不增加任何新的 Special Token。
-- 不把 `Listen` 的 `speech=0` 改为超时等待、静音容忍或防抖逻辑。
+- 不为语义未完成的静音等待增加第四个 FSM 状态；等待和超时由 Listen 内部输入策略管理。
 - 不新增独立的打断确认、说话人验证、重试或音频分流状态。
 - 不改变 `Judge` 的 Break 优先规则、`Listen` 的 `complete=1 ∨ speech=0` 结束规则。
 - 不规定具体 Omni 模型结构、训练方案、推理引擎或 GPU 调度细节。
