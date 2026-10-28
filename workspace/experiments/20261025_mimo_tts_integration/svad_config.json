@@ -6,16 +6,17 @@
     "silence_duration_ms": "连续静音达到该时长后，AVAD 才产生 speech_stopped，单位毫秒。增大可容忍更长的句内停顿，但 VAED 判断会更晚。",
     "min_speech_duration_ms": "语音至少持续该时长才确认 speech active，单位毫秒，用于过滤短促噪声。",
     "max_buffered_chunks": "单个候选或用户话轮允许缓存的最大浏览器音频块数量，用于限制内存占用；不是毫秒值。",
+    "vasd_window_ms": "VASD 每次分类只查看最近多少毫秒音频。窗口未满时使用已有前缀；达到窗口后按完整浏览器 chunk 滑动。该窗口不裁剪后续推理使用的完整音频上下文。",
     "break_probability_threshold": "VASD 接受 <b> 打断结果所需的最低归一化概率，范围 0 到 1。低于阈值的 <b> 只作为候选显示，不触发打断。",
     "break_margin_threshold": "VASD 中 <b> 相对第二名候选的最小原始 logprob 差值。默认 1.5 表示第一名相对第二名至少约 exp(1.5)=4.5 倍。",
-    "break_confirmations": "需要连续多少个累计语音前缀都给出合格 <b> 才真正打断。任何 </b>、REJECT 或低置信 <b> 都会将计数清零。",
+    "break_confirmations": "需要连续多少个累计语音窗口都给出合格 <b> 才真正打断。任何 </b> 或低置信 <b> 都会将计数清零。",
     "complete_probability_threshold": "VAED 接受 <c> 语义完成结果所需的最低归一化概率，范围 0 到 1。越高越保守，越不容易提前 Decode。",
     "complete_margin_threshold": "VAED 的 logprob(<c>) 与 logprob(</c>) 的最小差值。默认 2.0 表示 <c> 的相对优势约为 exp(2)=7.4 倍。",
     "complete_confirmations": "需要连续多少个声学停顿点都给出合格 <c> 才 Decode。默认 1；设为 2 会等待两个端点确认。",
     "incomplete_silence_timeout_ms": "VAED 返回 </c> 后允许用户继续说话的最长静音等待时间，单位毫秒；超时后外部策略兜底 Decode。设为 0 表示关闭超时。",
-    "vasd_prompt": "Judge 状态使用的中文系统 Prompt。要求 MiMo 只输出 A/B/C，分别映射 <b>、</b> 和 REJECT。",
-    "vaed_prompt": "仅在 AVAD speech_stopped 时使用的中文系统 Prompt。MiMo 根据完整累计话轮输出 A/B，分别映射 <c> 和 </c>。",
-    "chat_prompt": "FSM 发出 DECODE 后用于生成文字回答的中文系统 Prompt，不参与 VASD 或 VAED 分类。",
+    "vasd_prompt": "Judge 状态使用的中文系统 Prompt。要求 MiMo 只输出“需要”或“不需要”，分别映射打断 <b> 和不打断 </b>。",
+    "vaed_prompt": "仅在 AVAD speech_stopped 时使用的中文系统 Prompt。MiMo 根据完整累计话轮只输出“已”或“未”，分别映射完整 <c> 和未完整 </c>。",
+    "chat_prompt": "FSM 发出 DECODE 后用于生成文字回答的中文系统 Prompt，不参与 VASD 或 VAED 分类。Chat 必须看到该轮所有经 SVAD 接受的音频；无主动交互意图时由本 Prompt 要求模型精确输出 listening。",
     "生效方式": "修改并保存本文件后刷新网页即可加载新默认值；已建立的会话需要刷新后重新启动麦克风，或在页面点击“应用全部设置”。"
   },
   "config": {
@@ -25,7 +26,8 @@
     "silence_duration_ms": 500,
     "min_speech_duration_ms": 96,
     "max_buffered_chunks": 512,
-    "break_probability_threshold": 0.9,
+    "vasd_window_ms": 8000,
+    "break_probability_threshold": 0.75,
     "break_margin_threshold": 1.5,
     "break_confirmations": 1,
     "complete_probability_threshold": 0.8,
@@ -34,8 +36,8 @@
     "incomplete_silence_timeout_ms": 500
   },
   "prompts": {
-    "vasd_prompt": "你是双工语音助手的语义打断分类器。请根据候选用户音频，只输出一个分类码：\nA：用户正在对助手表达有意义的请求或问题，应当打断助手，对应 <b>；\nB：音频内容可以理解，有语义信息，但不应打断助手，比如用户在自言自语或者在跟同伴交流，对应 </b>；\nC：没有可接受的有效语义，例如环境噪声或无法辨认的声音，对应 REJECT。\n只能输出 A、B 或 C，不得解释。",
-    "vaed_prompt": "你是双工语音助手的语义结束分类器。请根据当前累计的用户音频，只输出一个分类码：\nA：用户语义已经完整，助手可以开始回答，对应 <c>；\nB：用户仍在表达未完成的意思，需要继续聆听，对应 </c>。\n只能输出 A 或 B，不得解释。",
-    "chat_prompt": "你叫小微，别人会用小微小微唤醒你，你可以自我介绍说初次见面，我是小微。你是一个实时语音对话助手。请直接理解用户音频并回答用户的问题。回复应自然、简洁、口语化，优先使用一到三句话（但不许规避需要长回答的情况）；不要输出 Markdown，不要展示思考过程。始终使用用户所使用的语言回答。注意，如果用户没有交互意图，比如用户在自言自语或者在跟同伴交流等情况，你回答still listening就可以了，不需要额外作答。"
+    "vasd_prompt": "你是一个实时语音语义边界判断助手。\n你的任务是根据输入的语音信号，隐式理解语音内容，判断当前语音是否已经表达出打断助手的意图。\n\n判定为“需要”：\n- 叫停或插话，例如“等等”“先别说”“我想问”。\n- 反驳或否定，例如“不对”“你错了”“我不同意”。\n- 急切表达、抢话或明确转移话题。\n\n判定为“不需要”：\n- 语气词，例如“嗯”“哦”“啊”“呃”“Well”“Oh”“Hum”。\n- 附和，例如“对对对”“嗯你说得对”“是的”“挺好的”“you are right”“yeah”“Oh, good”。\n- 表达继续听的兴趣，例如“继续”“然后呢”“有点意思”。\n- 非语言声音，例如笑声、咳嗽声、背景声或噪声。\n\n只能输出“需要”或“不需要”之一；不得输出空格、换行、解释或任何其他内容。",
+    "vaed_prompt": "你是一个实时语音语义边界判断助手。\n你的任务是根据输入的语音信号，隐式理解语音内容，判断当前累计语音是否已经形成完整表达。\n\n判定为“已”：\n- 已表达完整语义。\n- 句子自然结束，例如陈述、评价、祈使、感叹或附和。\n- 存在明确交接信号，例如提问、请求反馈或征询意见。\n\n判定为“未”：\n- 句子明显缺失、截断或悬空。\n- 表达仍在进行中。\n- 正在思考或犹豫，语义尚未收束。\n\n只能输出“已”或“未”之一；不得输出空格、换行、解释或任何其他内容。",
+    "chat_prompt": "你叫小微，别人会用小微小微唤醒你，你可以自我介绍说初次见面，我是小微。你是一个实时语音对话助手。请直接理解用户音频并回答用户的问题。回复应自然、简洁、口语化，优先使用一到三句话（但不许规避需要长回答的情况）；不要输出 Markdown，不要展示思考过程。始终使用用户所使用的语言回答。注意，如果用户没有主动与助手交互的意图，例如用户在自言自语或者跟同伴交流，请精确输出 listening，不需要额外作答。"
   }
 }

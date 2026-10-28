@@ -5,9 +5,29 @@ This stage adds the specified acoustic + semantic input controller on branch
 `duplex_input_fsm_function_spec.md`; this document describes the repository
 integration and its current acceptance boundary.
 
+## v0.3 Worktree Update
+
+The current worktree changes VASD to a duration-bounded A/B classifier:
+
+- `vasd_window_ms` defaults to 8000ms.
+- The first speech chunk is classified immediately.
+- Before the window fills, VASD sees the available prefix; after it fills,
+  complete browser chunks slide out from the left.
+- VASD allows only `A -> <b>` (semantic content) and `B -> </b>` (no semantic
+  content). The previous C/REJECT class is removed from VASD.
+- Sliding applies only to classification. Candidate/turn audio retained for
+  inference remains complete.
+
+After VAED completes, the debug service passes the complete accepted user turn
+directly to normal MiMo Chat. There is no additional LISTENING/GENERATE
+classifier, threshold, response Prompt or KV sidecar gate. The Chat Prompt may
+instruct the model to output exactly `listening` when it finds no active user
+interaction intent. This is text-generation policy, not another FSM state.
+
 Detailed current-state documentation:
 [`current_vad_implementation_20261026.md`](current_vad_implementation_20261026.md).
-It describes the normative FSM and the currently running `svad12` v0.2 behavior.
+It distinguishes historical v0.2 evidence from the current v0.3 acceptance
+service.
 
 ## Implemented Components
 
@@ -16,8 +36,10 @@ It describes the normative FSM and the currently running `svad12` v0.2 behavior.
   `speech_stopped` edge while in Listen.
 - `MiMoSemanticVADProvider`: sends candidate audio to the existing MiMo
   `/v1/chat/completions` audio interface and parses:
-  - VASD: `<b>`, `</b>`, or internal `REJECT`.
+  - VASD: `<b>` or `</b>`.
   - VAED: `<c>` or `</c>`.
+- `MiMoChatProvider`: receives the complete `decode_audio` sequence for the
+  accepted turn and streams the normal Chat response.
 - `SemanticRealtimeAdapter`: runs Silero AVAD, buffers candidate audio, and
   maps FSM events onto the existing realtime runner.
 - Speak-decision boundary: `choose_decode_token` implements
@@ -124,18 +146,18 @@ The transition log also shows MiMo's exact generated `message.content`, the
 normalized command and whether strict command validation passed.
 
 The normative labels are not single tokenizer tokens in this checkpoint:
-`<b>` uses two tokens, `</b>` three, `<c>` two, `</c>` three, and `REJECT`
-two. The runtime therefore uses constrained internal single-token class codes
-without modifying the tokenizer or checkpoint:
+`<b>` uses two tokens, `</b>` three, `<c>` two and `</c>` three. The runtime
+therefore uses constrained Chinese single-token class codes without modifying
+the tokenizer or checkpoint:
 
-- VASD: `A -> <b>`, `B -> </b>`, `C -> REJECT`.
-- VAED: `A -> <c>`, `B -> </c>`.
+- VASD: `需要` (ID 85106) -> `<b>`, `不需要` (ID 104689) -> `</b>`.
+- VAED: `已` (ID 36667) -> `<c>`, `未` (ID 38342) -> `</c>`.
 
-Each request sets `allowed_token_ids`, `logprob_token_ids`, `logprobs=true` and
-`max_tokens=1`. The sampled code must equal the candidate-logprob argmax. The
-page and logs expose the canonical-label logprobs, normalized confidence and
-top-two logprob margin. External FSM events continue to use the six normative
-tokens rather than the internal A/B/C codes.
+Each semantic-classifier request sets `allowed_token_ids`, `logprob_token_ids`,
+`logprobs=true` and `max_tokens=1`. The sampled code must equal the
+candidate-logprob argmax. The page and logs expose the canonical-label
+logprobs, normalized confidence and top-two logprob margin. External FSM events
+continue to use the six normative tokens rather than the internal Chinese codes.
 
 Continuous `Silence -> Silence` audio blocks are not written as separate INFO
 transitions. They are accumulated and emitted once as a
@@ -152,12 +174,13 @@ Chrome profile:
   --new-window http://28.29.217.180:8080/
 ```
 
-Live services currently use separate retained run directories:
+Live services currently use separate retained run directories. Snapshot taken
+on 2026-10-28 after the v0.3 cleanup:
 
 - MiMo PID 42095, supervisor 42091, GPU 0-3, loopback 8090.
-- SVAD UI `svad12` PID 146753, supervisor 146752, CPU,
+- SVAD UI `svad16` PID 303536, supervisor 303530, CPU,
   `28.29.217.180:8080`, run directory
-  `workspace/logs/20261027T035800Z_mimo_svad_chunk_config/`.
+  `workspace/logs/20261028T053651Z_mimo_single_phase2_1babea77/`.
 - TTS remains stopped; GPU 4-7 are unused.
 
 Fresh real-model checks before user acceptance:
@@ -176,7 +199,7 @@ No acceptance-console change has been committed or pushed.
 
 ## FSM-Driven Text Conversation
 
-The current uncommitted `svad12` acceptance service connects FSM DECODE
+The current uncommitted `svad16` acceptance service connects FSM DECODE
 to MiMo text generation. TTS remains stopped.
 
 - A DECODE carries the complete accepted turn audio to MiMo Chat.

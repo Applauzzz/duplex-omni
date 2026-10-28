@@ -64,7 +64,8 @@ def main():
             "--reasoning-parser", "mimo", "--host", "127.0.0.1", "--port", str(args.port),
         ]
     env = os.environ.copy()
-    env["PYTHONPATH"] = f"{run / 'runtime'}:{root / 'vllm-omni'}"
+    runtime_source = run / "runtime"
+    env["PYTHONPATH"] = f"{runtime_source}:{root / 'vllm-omni'}"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     env["HF_HUB_OFFLINE"] = "1"
@@ -86,7 +87,7 @@ def main():
             "utc": datetime.now(timezone.utc).isoformat(), "command": command,
             "python": sys.executable, "versions": versions, "pid": child.pid,
             "pgid": child.pid, "supervisor_pid": os.getpid(),
-            "env": {key: env[key] for key in ("PYTHONPATH", "CUDA_VISIBLE_DEVICES",
+            "env": {key: env.get(key, "") for key in ("PYTHONPATH", "CUDA_VISIBLE_DEVICES",
                     "VLLM_WORKER_MULTIPROC_METHOD", "VLLM_CACHE_ROOT",
                     "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "OMP_NUM_THREADS")},
             "gpu_inventory": subprocess.check_output([

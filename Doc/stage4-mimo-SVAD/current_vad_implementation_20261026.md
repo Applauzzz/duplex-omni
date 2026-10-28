@@ -1,12 +1,23 @@
 # 当前 MiMo Semantic VAD 实现详解
 
-更新时间：2026-10-26
+> 2026-10-28 v0.3 工作树更新：VASD 已改为 8 秒默认滑窗的 A/B 有语义/
+> 无语义分类；首个 speech chunk 即判断。VAED 保持 AVAD speech-stop 后判定。
+> VASD 滑窗只限制分类输入，`DECODE` 必须向普通 MiMo Chat 交付本轮所有已
+> 接受音频。用户无主动交互意图时由 Chat Prompt 要求模型精确输出
+> `listening`；不再使用受限 LISTENING/GENERATE 分类、阈值或 KV sidecar。
+> 2026-10-28 标签更新：VASD 的受限输出为 `需要`/`不需要`，分别映射
+> `<b>`/`</b>`；VAED 的受限输出为 `已`/`未`，分别映射 `<c>`/`</c>`。
+> 这四个字符串在当前 MiMo tokenizer 中均为单 token。
+
+更新时间：2026-10-28
 分支：`feature/SVAD`
 规范来源：`duplex_input_fsm_function_spec.md`
 主要实现：`workspace/experiments/20261025_mimo_tts_integration/semantic_vad.py`
 调试服务：`workspace/experiments/20261025_mimo_tts_integration/svad_debug_server.py`
 
-本文描述当前仓库中的 Semantic VAD 实现和当前运行服务。
+本文主体记录 v0.2 的实现和历史验收证据；文件开头的 2026-10-27 注记描述
+当前 v0.3 工作树差异。涉及 REJECT、A/B/C VASD 的正文均属于 v0.2 历史，
+不代表 v0.3 当前策略。
 它不是新的功能规格；状态机的权威规则仍然是
 `duplex_input_fsm_function_spec.md`。
 
@@ -14,18 +25,19 @@
 
 当前需要区分两类事实：
 
-1. **规范要求**：三状态 FSM、VASD Reject、VAED Complete、四类控制事件。
-2. **当前运行服务 `svad08`**：已经加载 v0.2 端点触发 VAED 逻辑。
+1. **规范要求**：三状态 FSM、A/B VASD、VAED Complete、四类控制事件。
+2. **当前运行服务 `svad16`**：加载 v0.3 VASD 滑窗和完整 `decode_audio` Chat
+   交付逻辑；v0.2 记录仅作为历史证据。
 
-当前运行服务：
+当前运行服务快照（2026-10-28）：
 
 | 服务 | PID | 监听 | 资源 | 状态 |
 |---|---:|---|---|---|
 | MiMo | 42095 | `127.0.0.1:8090` | GPU 0-3 | 运行中 |
-| SVAD UI `svad12` | 146753 | `28.29.217.180:8080` | CPU | 运行中 |
+| SVAD UI `svad16` | 303536 | `28.29.217.180:8080` | CPU | 运行中 |
 | Qwen3-TTS | - | 8093 无监听 | GPU 4-7 未用于本任务 | 未启动 |
 
-`svad12` 已经包含：
+当前 `svad16` 服务包含：
 
 - Silero AVAD。
 - MiMo VASD / VAED。

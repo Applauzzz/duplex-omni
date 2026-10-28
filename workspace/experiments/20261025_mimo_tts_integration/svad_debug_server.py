@@ -73,6 +73,7 @@ def load_local_settings(path: Path) -> dict[str, object]:
             "silence_duration_ms": config.silence_duration_ms,
             "min_speech_duration_ms": config.min_speech_duration_ms,
             "max_buffered_chunks": config.max_buffered_chunks,
+            "vasd_window_ms": config.vasd_window_ms,
             "break_probability_threshold": config.break_probability_threshold,
             "break_margin_threshold": config.break_margin_threshold,
             "break_confirmations": config.break_confirmations,
@@ -200,6 +201,7 @@ async def websocket(request):
                     "silence_duration_ms": payload.get("silence_duration_ms", local_config["silence_duration_ms"]),
                     "min_speech_duration_ms": payload.get("min_speech_duration_ms", local_config["min_speech_duration_ms"]),
                     "max_buffered_chunks": payload.get("max_buffered_chunks", local_config["max_buffered_chunks"]),
+                    "vasd_window_ms": payload.get("vasd_window_ms", local_config["vasd_window_ms"]),
                     "break_probability_threshold": payload.get("break_probability_threshold", local_config["break_probability_threshold"]),
                     "break_margin_threshold": payload.get("break_margin_threshold", local_config["break_margin_threshold"]),
                     "break_confirmations": payload.get("break_confirmations", local_config["break_confirmations"]),
@@ -230,6 +232,7 @@ async def websocket(request):
                         "silence_duration_ms": config.silence_duration_ms,
                         "min_speech_duration_ms": config.min_speech_duration_ms,
                         "max_buffered_chunks": config.max_buffered_chunks,
+                        "vasd_window_ms": config.vasd_window_ms,
                         "break_probability_threshold": config.break_probability_threshold,
                         "break_margin_threshold": config.break_margin_threshold,
                         "break_confirmations": config.break_confirmations,
@@ -338,7 +341,11 @@ async def context(app):
         yield
 
 
-def create_app(*, mimo_url="http://127.0.0.1:8090", config_path=DEFAULT_CONFIG_PATH):
+def create_app(
+    *,
+    mimo_url="http://127.0.0.1:8090",
+    config_path=DEFAULT_CONFIG_PATH,
+):
     app = web.Application(client_max_size=2 * 1024 * 1024)
     app["mimo_url"] = mimo_url.rstrip("/")
     app["config_path"] = Path(config_path)
@@ -362,7 +369,10 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    web.run_app(create_app(mimo_url=args.mimo_url, config_path=args.config), host=args.host, port=args.port,
+    web.run_app(create_app(
+        mimo_url=args.mimo_url,
+        config_path=args.config,
+    ), host=args.host, port=args.port,
                 handler_cancellation=True)
 
 

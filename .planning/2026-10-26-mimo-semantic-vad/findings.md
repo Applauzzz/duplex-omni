@@ -60,6 +60,14 @@
 | VASD BREAK is currently unthresholded and asymmetric | Any argmax `<b>` immediately leaves Judge, including observed probability0.543/margin0.25, while `</b>` must keep winning every cumulative-prefix request; recent missing NO_BREAK is prompt/policy bias, not a broken B token path |
 | Gate BREAK symmetrically with COMPLETE | Preserve model `<b>` telemetry but require configurable probability, margin and consecutive-prefix confirmations before FSM receives effective break=1 |
 | Define browser chunk size as a minimum target interval | A single in-flight semantic request can delay dispatch, so exact fixed-duration chunks are impossible without concurrent requests or dropping audio; expose `audio_chunk_ms` and merge delayed audio |
+| Current MiMo realtime plugin is commit-only | `MiMoTTSPlugin.plan_append()` raises on `final=False`, advertises `supports_turn_commit_only=True`, and does not expose a resumable audio append request |
+| Native duplex resumable requests exist for other models | MiniCPM-o, Nemotron VoiceChat and PersonaPlex use `supports_core_resumable_request=True`; MiMo needs an equivalent model/plugin contract rather than parent-side buffering |
+| Raw MiMo engine append probe succeeded but is not productized | Same-request audio append can work at a low-level engine surface, but switching its one-token classification flow into generation hit a scheduler token-budget issue; user deferred this backend work |
+| Complete-context Chat is the current inference contract | `FSMOutput.decode_audio` contains every SVAD-accepted chunk in one user turn; `svad_debug_server.py` passes it unchanged to `MiMoChatProvider.stream_reply` |
+| No response-side classifier in v0.3 | The experimental A/B LISTENING/GENERATE path, thresholds, sidecar service and UI controls were removed; no-intent handling is now the Chinese Chat Prompt's literal `listening` response |
+| SVAD launchers must tolerate an unset `CUDA_VISIBLE_DEVICES` | The CPU-only UI inherited no such variable; the launch-manifest formatter now records an empty value rather than crashing after spawning the child |
+| Chinese constrained labels are valid single tokens | Direct `tokenizer.json` encoding gave `已=36667`、`未=38342`、`需要=85106`、`不需要=104689`; leading-space variants are multi-token and must not be emitted |
+| Live MiMo accepts the Chinese masks | On 2026-10-28, VASD `[85106,104689]` returned `需要` with both candidate logprobs; VAED `[36667,38342]` returned `未` with both candidate logprobs |
 
 ## Issues Encountered
 | Issue | Resolution |

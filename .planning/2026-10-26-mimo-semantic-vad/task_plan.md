@@ -6,10 +6,10 @@ using acoustic VAD plus Omni-backed VASD/VAED interfaces to emit ordered
 PREFILL, CHUNK_PREFILL and DECODE events without changing the specified FSM.
 
 ## Next Step
-Run user browser acceptance against `svad12` with the Beijing pause/resume
-example. Confirm the first endpoint returns `</c>` and remains Listen, resumed
-speech stays in the same turn, and a later accepted `<c>` triggers one DECODE.
-Do not commit or push until the user accepts the behavior.
+Finish v0.3 acceptance: preserve duration-bounded sliding-window A/B VASD and
+endpoint-triggered VAED, while requiring Chat to receive every SVAD-accepted
+chunk from the complete user turn at DECODE. Do not add a response classifier
+or claim model-side incremental KV reuse; rejection is a Chat Prompt policy.
 
 ## Current Phase
 Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
@@ -62,6 +62,15 @@ Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
 - [x] Verify semantic classification remains independent from Chat generation
 - **Status:** in_progress
 
+### Phase 7: Sliding Semantic Window And Complete-Context Chat Contract
+- [x] Add duration-aware VASD sliding window without truncating inference context
+- [x] Replace VASD A/B/C with masked A/B semantic/no-semantic classification
+- [x] Preserve VAED only after AVAD speech-stop silence
+- [x] Pass every SVAD-accepted chunk from the complete user turn to Chat at DECODE
+- [x] Remove the experimental LISTENING/GENERATE classifier and KV sidecar
+- [x] Defer native MiMo request/KV reuse as a separate backend capability
+- **Status:** complete
+
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
@@ -81,6 +90,9 @@ Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
 | Allow Listen to span semantic-incomplete silence | Supports `[</c>, </s>]` followed by resumed speech in the same user turn |
 | Use an external incomplete-silence timeout | Prevents an incomplete semantic turn from waiting forever without adding a fourth FSM state |
 | Publish the current snapshot with browser long-utterance acceptance still open | User explicitly requested commit and push; preserve the open acceptance item rather than claiming it passed |
+| Keep VASD window separate from inference context | Classification needs bounded recent evidence; downstream reasoning must retain every accepted audio chunk |
+| Treat MiMo incremental prefill as a backend capability gate | Current plugin rejects `final=False`; append buffering or repeated cumulative HTTP requests are not model-side KV reuse |
+| Keep rejection inside the Chat Prompt for now | User requires normal complete-context management and does not want a second inference classifier or KV sidecar gate |
 
 ## Errors Encountered
 | Error | Resolution |

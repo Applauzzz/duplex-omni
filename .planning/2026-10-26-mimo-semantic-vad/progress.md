@@ -215,6 +215,67 @@
 - User explicitly authorized committing and pushing the current `feature/SVAD`
   snapshot. Publication no longer waits on the still-open Beijing browser
   acceptance; that acceptance remains documented as an open quality gate.
+- New v0.3 direction: VASD uses a configurable x-second sliding window and
+  becomes binary semantic/no-semantic (`<b>`/`</b>`); VAED remains acoustic-
+  endpoint triggered. Inference must retain all SVAD-accepted audio from a
+  user turn and deliver that complete context to Chat at DECODE.
+- Backend audit found the current MiMo realtime plugin is not capable of the
+  requested model-side behavior: it advertises turn-commit-only and raises
+  `MiMo inference requires a committed turn` on non-final append. Existing
+  append commands only buffer audio. Native resumable Stage0 examples exist in
+  other model plugins, so real MiMo KV reuse requires a new backend contract.
+- Implemented v0.3 strategy layer in the worktree. VASD is now masked A/B only,
+  runs on t0 immediately, and uses a duration-aware `vasd_window_ms` suffix.
+  A 500ms/8s test proves `[t0..t15] -> [t1..t16]` while full candidate audio
+  still retains all17 chunks. VAED endpoint behavior is unchanged.
+- An experimental masked A/B Response decision (`LISTENING`/`GENERATE`),
+  thresholds, sidecar server and fourth Prompt were added briefly but were not
+  accepted. They were removed on 2026-10-28. The accepted v0.3 contract is
+  normal full-context Chat: `DECODE` passes the complete `decode_audio` to
+  MiMo Chat, and the Chinese Chat Prompt asks for literal `listening` when
+  there is no active interaction intent. Native MiMo request/KV reuse remains
+  deferred backend work and is not claimed by the service.
+- Completed v0.3 cleanup on 2026-10-28. Removed the uncommitted streaming
+  sidecar, its launcher role, classifier tests, fourth Prompt, response
+  thresholds, WebSocket `response.decision` events and UI controls. The debug
+  service now has a single DECODE path: `output.decode_audio` is passed
+  directly and unchanged to `MiMoChatProvider.stream_reply`.
+- Strengthened the WebSocket regression: three distinct accepted audio chunks
+  must arrive at Chat in exact input order, including the adapter's normalized
+  append metadata. This proves the Chat path uses the complete accepted turn,
+  not the VASD suffix window or only the final chunk.
+- Outside-sandbox validation on 2026-10-28 used `env.sh`, `conda activate
+  omni`, and repository-local `vllm-omni`/`vllm-src` import roots:
+  `python -B -m unittest test_semantic_vad test_svad_debug -q` passed 43/43.
+  JSON parsing, Python compile, frontend JavaScript parsing with the pinned
+  Node binary, stale-response-control scan and `git diff --check` also passed.
+- First `svad13` launch exposed a launcher assumption: `run_service.py` raised
+  `KeyError: CUDA_VISIBLE_DEVICES` after spawning the CPU UI child, so the
+  child was stopped. The launcher now records an empty value when the variable
+  is absent. A new retained `svad14` run started in
+  `workspace/logs/20261028T042103Z_mimo_single_phase2_8d3aafea/` with
+  supervisor PID282603 and UI PID282608. MiMo PID42095 on loopback8090 was not
+  restarted. After Silero initialized, `/health` returned `mimo=true` at1.8ms;
+  `/defaults` exposed only VASD/VAED/Chat prompts and the served page had no
+  response-classifier controls.
+- Updated the two semantic prompts on 2026-10-28 using the supplied boundary
+  policy. VASD now constrains MiMo to `需要 -> <b>` or `不需要 -> </b>`; VAED
+  constrains it to `已 -> <c>` or `未 -> </c>`. Direct local `tokenizer.json`
+  verification found IDs `需要=85106`、`不需要=104689`、`已=36667`、`未=38342`,
+  all one token without a leading space. A live HTTP probe accepted both masks:
+  VASD returned `需要`; VAED returned `未`; each response included both
+  requested candidate logprobs. The classifier parser now rejects surrounding
+  whitespace as well as explanations, preserving exact-label observability.
+- Restarted only the CPU UI as `svad15` in
+  `workspace/logs/20261028T044418Z_mimo_single_phase2_3b2e9797/` after the
+  label change; supervisor PID289405 and UI PID289410. MiMo PID42095 was
+  preserved. `/health` returned `mimo=true` at1.7ms, and `/defaults` confirmed
+  the three Prompt keys plus exact `需要/不需要` and `已/未` output instructions.
+- After aligning invalid-command diagnostics with the Chinese labels, restarted
+  only the CPU UI as `svad16` in
+  `workspace/logs/20261028T053651Z_mimo_single_phase2_1babea77/`; supervisor
+  PID303530 and UI PID303536. MiMo PID42095 remained unchanged. `/health`
+  returned `mimo=true` at2.0ms and `/defaults` verified the final prompts.
 
 ### Test Results
 | Test | Expected | Actual | Status |

@@ -28,7 +28,7 @@ class Provider:
     async def decide_break(self, audio_chunks, *, context):
         return VASDDecision(
             True, raw_output="A", command="<b>",
-            logprobs={"<b>": -.1, "</b>": -2.1, "REJECT": -3.1},
+            logprobs={"<b>": -.1, "</b>": -2.1},
             probability=.844, margin=2.0,
         )
 
@@ -38,7 +38,6 @@ class Provider:
             logprobs={"<c>": -.1, "</c>": -2.1},
             probability=.95, margin=3.0,
         )
-
 
 class VAD:
     def process_base64(self, *_args, **_kwargs):
@@ -98,6 +97,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                 "silence_duration_ms": 500,
                 "min_speech_duration_ms": 96,
                 "max_buffered_chunks": 512,
+                "vasd_window_ms": 8000,
                 "break_probability_threshold": .8,
                 "break_margin_threshold": 1.5,
                 "break_confirmations": 1,
@@ -224,14 +224,19 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(configured["config"]["max_buffered_chunks"], 512)
             self.assertEqual(configured["config"]["audio_chunk_ms"], 500)
             self.assertEqual(configured["config"]["break_probability_threshold"], .8)
-            pcm = base64.b64encode((np.ones(512, dtype="<i2") * 12000).tobytes()).decode()
-            for expected_state in ("Judge", "Listen", "Silence"):
-                await ws.send_json({
+            audio_payloads = []
+            for amplitude in (10000, 12000, 14000):
+                pcm = base64.b64encode(
+                    (np.ones(512, dtype="<i2") * amplitude).tobytes()
+                ).decode()
+                audio_payloads.append({
                     "type": "audio",
                     "audio": pcm,
                     "format": "pcm16",
                     "sample_rate_hz": 16000,
                 })
+            for expected_state, payload in zip(("Listen", "Listen", "Silence"), audio_payloads):
+                await ws.send_json(payload)
                 event = await ws.receive_json()
                 self.assertEqual(event["type"], "transition")
                 self.assertEqual(event["transition"]["next_state"], expected_state)
@@ -253,7 +258,15 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             ])
             self.assertEqual(done["text"], "你好，这是测试回复。")
             self.assertEqual(self.chat.calls[0]["prompt"], DEFAULT_CHAT_PROMPT)
-            self.assertEqual(len(self.chat.calls[0]["audio_chunks"]), 3)
+            self.assertEqual(self.chat.calls[0]["audio_chunks"], tuple(
+                {
+                    "type": "input_audio_buffer.append",
+                    "audio": payload["audio"],
+                    "format": "pcm16",
+                    "sample_rate_hz": 16000,
+                }
+                for payload in audio_payloads
+            ))
             await ws.send_json({"type": "reset"})
             self.assertEqual((await ws.receive_json())["type"], "reset")
             await ws.close()
@@ -270,6 +283,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             "silence_duration_ms": 900,
             "min_speech_duration_ms": 64,
             "max_buffered_chunks": 768,
+            "vasd_window_ms": 6000,
             "break_probability_threshold": .75,
             "break_margin_threshold": 1.25,
             "break_confirmations": 2,
@@ -290,6 +304,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             "silence_duration_ms": 900,
             "min_speech_duration_ms": 64,
             "max_buffered_chunks": 768,
+            "vasd_window_ms": 6000,
             "break_probability_threshold": .75,
             "break_margin_threshold": 1.25,
             "break_confirmations": 2,
@@ -339,7 +354,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.breaks += 1
                 return VASDDecision(
                     True, raw_output="A", command="<b>",
-                    logprobs={"<b>": -.1, "</b>": -2.1, "REJECT": -3.1},
+                    logprobs={"<b>": -.1, "</b>": -2.1},
                     probability=.9, margin=2.0,
                 )
 
@@ -394,9 +409,6 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(blocking.started.wait(), 1)
             # The first inactive block already completed the prior turn. Start a new one.
             await ws.send_json(payload)
-            judge = await ws.receive_json()
-            self.assertEqual(judge["transition"]["next_state"], "Judge")
-            await ws.send_json(payload)
             cancelled = await ws.receive_json()
             transition = await ws.receive_json()
             self.assertEqual(cancelled["type"], "chat.cancelled")
@@ -409,7 +421,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_model_command_is_visible_and_session_stays_open(self):
         class InvalidProvider:
             async def decide_break(self, audio_chunks, *, context):
-                raise InvalidSemanticCommand("VASD", "Answer: <b>", ("<b>", "</b>", "REJECT"))
+                raise InvalidSemanticCommand("VASD", "需要。", ("需要", "不需要"))
 
             async def decide_complete(self, audio_chunks, *, context):
                 return VAEDDecision(True, raw_output="<c>", command="<c>")
@@ -421,12 +433,10 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         pcm = base64.b64encode((np.ones(512, dtype="<i2") * 12000).tobytes()).decode()
         payload = {"type": "audio", "audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}
         await ws.send_json(payload)
-        self.assertEqual((await ws.receive_json())["type"], "transition")
-        await ws.send_json(payload)
         error = await ws.receive_json()
         self.assertEqual(error["type"], "semantic_error")
-        self.assertEqual(error["raw_output"], "Answer: <b>")
-        self.assertEqual(error["allowed"], ["<b>", "</b>", "REJECT"])
+        self.assertEqual(error["raw_output"], "需要。")
+        self.assertEqual(error["allowed"], ["需要", "不需要"])
         self.assertFalse(ws.closed)
         await ws.send_json({"type": "reset"})
         self.assertEqual((await ws.receive_json())["type"], "reset")
