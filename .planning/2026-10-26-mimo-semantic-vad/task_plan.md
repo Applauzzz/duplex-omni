@@ -6,10 +6,11 @@ using acoustic VAD plus Omni-backed VASD/VAED interfaces to emit ordered
 PREFILL, CHUNK_PREFILL and DECODE events without changing the specified FSM.
 
 ## Next Step
-Split VASD into parallel semantic-admission and interruption-intent decisions.
-Use semantic admission to enter Listen, consult interruption intent only while
-browser TTS playback is active, and add configurable retention of interrupted
-assistant text with a verified one-token interruption marker in MiMo history.
+Use one mandatory VASD_SEM decision for both admission and playback barge-in.
+Accepted semantic speech enters Listen; if browser TTS playback is active, the
+same accepted result immediately cancels the current response. The independent
+VASD_BREAK classifier and simultaneous user/agent speech policy are abandoned.
+Retained interrupted text continues to use the verified one-token marker.
 
 ## Current Phase
 Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
@@ -89,14 +90,14 @@ Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
 - [x] Prove PCM can arrive before `chat.done` on a controlled streamed reply
 - **Status:** complete
 
-### Phase 10: Dual VASD And Interrupted-Reply Context
-- [ ] Add independent VASD_SEM and VASD_BREAK prompts/providers/telemetry
-- [ ] Gate Judge -> Listen on VASD_SEM rather than interruption intent
-- [ ] Report browser TTS playback active/inactive to the service
-- [ ] Interrupt MiMo/TTS/playback only when VASD_BREAK is accepted during playback
-- [ ] Add a config switch for retaining interrupted assistant context
-- [ ] Append a verified one-token interruption marker to retained partial text
-- [ ] Explain marker semantics in the Chat prompt and test next-turn history
+### Phase 10: Semantic Barge-In And Interrupted-Reply Context
+- [x] Use mandatory VASD_SEM to gate Judge -> Listen
+- [x] Report browser TTS playback active/inactive to the service
+- [x] Interrupt MiMo/TTS/playback whenever VASD_SEM is accepted during playback
+- [x] Remove independent VASD_BREAK configuration, Prompt and inference request
+- [x] Add a config switch for retaining interrupted assistant context
+- [x] Append a verified one-token interruption marker to retained partial text
+- [x] Explain marker semantics in the base Chat prompt and test next-turn history
 - **Status:** in_progress
 
 ## Decisions Made
@@ -125,6 +126,7 @@ Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
 | Cancel one response task across Chat and TTS | A new effective BREAK must close MiMo/TTS streams and invalidate browser playback for the interrupted response |
 | Treat Audio Engine cancellation as client-side only | The deployed CosyVoice API exposes submit/poll but no task-cancel endpoint; BREAK stops polling and browser playback, while an already submitted upstream task may finish server-side |
 | Use `EagerTTSStrategy` for true streaming | Live A/B showed SmartSplit withheld PCM until final text completion, while Eager emitted first PCM about 202ms after the first non-final text chunk |
+| Collapse admission and interruption into VASD_SEM | User explicitly abandons simultaneous user/agent speech; any accepted semantic speech while TTS plays is immediate barge-in |
 
 ## Errors Encountered
 | Error | Resolution |

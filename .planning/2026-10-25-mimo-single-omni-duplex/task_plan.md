@@ -7,6 +7,17 @@ and Qwen3-TTS CustomVoice as the initial independent speech renderer.
 Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
+October30 policy simplification: replace the parallel VASD_SEM/VASD_BREAK
+design with one mandatory VASD_SEM classifier. `无` rejects candidate audio;
+`有` always admits it into Listen/PREFILL, and if TTS playback is active the
+same accepted semantic decision immediately interrupts MiMo/TTS/browser
+playback. Remove the independent break Prompt, request, thresholds,
+confirmations, telemetry and frontend controls. This intentionally abandons
+user/agent simultaneous speech: any admitted semantic speech during playback
+is barge-in. Preserve VAED, interrupted-context retention and the one-token
+marker. Validate focused state/provider/WebSocket/page behavior, then roll only
+the owned 8080 service while preserving MiMo 8090 and external TTS 8100.
+
 October29 Judge/BREAK observability correction: preserve mandatory VASD_SEM,
 change VASD_BREAK's constrained one-token surface from `需要/不需要` to `有/无`
 while retaining distinct `VASD_BREAK` telemetry and `<b>/</b>` policy commands.
@@ -147,6 +158,7 @@ by user request. Publication does not close the broader acceptance gates.
 | Gate Judge admission with `vasd_sem`; use `vasd_break` only during active TTS playback | Semantic speech must pass even when it is not an interruption, while noise must not enter the turn; break intent is relevant only to cancellation |
 | Make interrupted assistant retention configurable and mark retained partial output with one token | Preserve the current discard default while allowing later turns to refer to the exact interruption point without automatically continuing the old answer |
 | Limit this state-machine change to at most five focused test entry points | User explicitly requested a compact suite; prioritize end-to-end WebSocket behavior and directly affected state/provider tests |
+| Collapse semantic admission and barge-in into one VASD_SEM result | User explicitly abandons simultaneous user/agent speech; any accepted semantic speech during TTS playback must interrupt, while the same result admits the turn |
 
 ## Phase Deliverables and Acceptance
 

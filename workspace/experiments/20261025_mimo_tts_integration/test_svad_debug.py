@@ -21,17 +21,16 @@ from semantic_vad import (
     InvalidSemanticCommand,
     SemanticRealtimeAdapter,
     VAEDDecision,
-    VASDDecision,
     VASDSemDecision,
 )
 from svad_debug_server import create_app
 
 
 class Provider:
-    async def decide_break(self, audio_chunks, *, context):
-        return VASDDecision(
-            True, raw_output="A", command="<b>",
-            logprobs={"<b>": -.1, "</b>": -2.1},
+    async def decide_sem(self, audio_chunks, *, context):
+        return VASDSemDecision(
+            True, raw_output="A", command="SEMANTIC",
+            logprobs={"SEMANTIC": -.1, "NO_SEMANTIC": -2.1},
             probability=.844, margin=2.0,
         )
 
@@ -206,9 +205,9 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                 "min_speech_duration_ms": 96,
                 "max_buffered_chunks": 512,
                 "vasd_window_ms": 8000,
-                "break_probability_threshold": .8,
-                "break_margin_threshold": 1.5,
-                "break_confirmations": 1,
+                "sem_probability_threshold": .8,
+                "sem_margin_threshold": 1.5,
+                "sem_confirmations": 1,
                 "complete_probability_threshold": .9,
                 "complete_margin_threshold": 2.0,
                 "complete_confirmations": 1,
@@ -221,7 +220,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                 "tts_target_rms": -25,
             },
             "prompts": {
-                "vasd_prompt": DEFAULT_VASD_PROMPT,
+                "vasd_sem_prompt": DEFAULT_VASD_PROMPT,
                 "vaed_prompt": DEFAULT_VAED_PROMPT,
                 "chat_prompt": DEFAULT_CHAT_PROMPT,
             },
@@ -260,7 +259,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(token, html)
         self.assertIn("if(last.state!==t.previous_state)", html)
         self.assertIn("last=addSegment(t.previous_state)", html)
-        self.assertIn("addParallelDecision('VASD_BREAK'", html)
+        self.assertIn("playback barge-in", html)
         self.assertIn("const meaningful=t.previous_state!==t.next_state", html)
         self.assertIn("全部设置", html)
         self.assertIn('id="applySettings"', html)
@@ -268,12 +267,9 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="semProbability"', html)
         self.assertIn('id="semMargin"', html)
         self.assertIn('id="semConfirmations"', html)
-        self.assertIn('id="breakProbability"', html)
-        self.assertIn('id="breakMargin"', html)
-        self.assertIn('id="breakConfirmations"', html)
         self.assertIn('id="retainInterruptedContext"', html)
         self.assertIn('id="vasdSemPrompt"', html)
-        self.assertIn('id="vasdBreakPrompt"', html)
+        self.assertNotIn('id="vasdBreakPrompt"', html)
         self.assertIn("sem_probability_threshold", html)
         self.assertIn("retain_interrupted_context", html)
         self.assertIn("type:'playback.state',active", html)
@@ -290,7 +286,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(defaults["config"]["retain_interrupted_context"])
         self.assertEqual(defaults["config"]["sem_probability_threshold"], .8)
         self.assertTrue(defaults["prompts"]["vasd_sem_prompt"])
-        self.assertEqual(defaults["prompts"]["vasd_break_prompt"], DEFAULT_VASD_PROMPT)
+        self.assertNotIn("vasd_break_prompt", defaults["prompts"])
         self.assertEqual(defaults["prompts"]["vaed_prompt"], DEFAULT_VAED_PROMPT)
         self.assertEqual(defaults["prompts"]["chat_prompt"], DEFAULT_CHAT_PROMPT)
         self.assertEqual(defaults["source"], str(self.config_path))
@@ -358,7 +354,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(INTERRUPTED_CONTEXT_INSTRUCTION, configured["prompts"]["chat_prompt"])
             self.assertEqual(configured["config"]["max_buffered_chunks"], 512)
             self.assertEqual(configured["config"]["audio_chunk_ms"], 500)
-            self.assertEqual(configured["config"]["break_probability_threshold"], .8)
+            self.assertEqual(configured["config"]["sem_probability_threshold"], .8)
             audio_payloads = []
             for amplitude in (10000, 12000, 14000):
                 pcm = base64.b64encode(
@@ -423,9 +419,9 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             "min_speech_duration_ms": 64,
             "max_buffered_chunks": 768,
             "vasd_window_ms": 6000,
-            "break_probability_threshold": .75,
-            "break_margin_threshold": 1.25,
-            "break_confirmations": 2,
+            "sem_probability_threshold": .75,
+            "sem_margin_threshold": 1.25,
+            "sem_confirmations": 2,
             "complete_probability_threshold": .85,
             "complete_margin_threshold": 1.5,
             "complete_confirmations": 2,
@@ -436,7 +432,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             "tts_max_chars": 32,
             "tts_speed": 1.2,
             "tts_target_rms": -24,
-            "vasd_prompt": "中文 VASD all in one",
+            "vasd_sem_prompt": "中文 VASD all in one",
             "vaed_prompt": "中文 VAED all in one",
             "chat_prompt": "中文 Chat all in one",
         })
@@ -450,9 +446,9 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             "min_speech_duration_ms": 64,
             "max_buffered_chunks": 768,
             "vasd_window_ms": 6000,
-            "break_probability_threshold": .75,
-            "break_margin_threshold": 1.25,
-            "break_confirmations": 2,
+            "sem_probability_threshold": .75,
+            "sem_margin_threshold": 1.25,
+            "sem_confirmations": 2,
             "complete_probability_threshold": .85,
             "complete_margin_threshold": 1.5,
             "complete_confirmations": 2,
@@ -723,14 +719,6 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                     probability=.9, margin=2.0,
                 )
 
-            async def decide_break(self, audio_chunks, *, context):
-                self.breaks += 1
-                return VASDDecision(
-                    True, raw_output="有", command="<b>",
-                    logprobs={"<b>": -.1, "</b>": -2.1},
-                    probability=.9, margin=2.0,
-                )
-
             async def decide_complete(self, audio_chunks, *, context):
                 return VAEDDecision(
                     True, raw_output="A", command="<c>",
@@ -791,30 +779,18 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(transition["type"], "transition")
             self.assertEqual(transition["transition"]["fsm_event"], "PREFILL")
             self.assertTrue(transition["transition"]["interrupt"])
-            self.assertEqual(
-                transition["transition"]["parallel_decisions"]["VASD_SEM"]["label"],
-                "SEMANTIC",
-            )
-            self.assertEqual(
-                transition["transition"]["parallel_decisions"]["VASD_BREAK"]["label"],
-                "BREAK",
-            )
+            self.assertEqual(transition["transition"]["semantic_label"], "SEMANTIC")
+            self.assertTrue(transition["transition"]["semantic_accepted"])
+            self.assertTrue(transition["transition"]["playback_active"])
             await asyncio.wait_for(blocking.cancelled.wait(), 1)
             await ws.close()
 
-    async def test_semantic_non_break_is_admitted_without_cancelling_chat(self):
+    async def test_semantic_while_not_playing_is_admitted_without_cancelling_chat(self):
         class ScriptedProvider:
             async def decide_sem(self, audio_chunks, *, context):
                 return VASDSemDecision(
                     True, raw_output="有", command="SEMANTIC",
                     logprobs={"SEMANTIC": -.1, "NO_SEMANTIC": -2.1},
-                    probability=.9, margin=2.0,
-                )
-
-            async def decide_break(self, audio_chunks, *, context):
-                return VASDDecision(
-                    False, raw_output="无", command="</b>",
-                    logprobs={"<b>": -2.1, "</b>": -.1},
                     probability=.9, margin=2.0,
                 )
 
@@ -865,20 +841,14 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await ws.receive_json())["type"], "transition")
             self.assertEqual((await ws.receive_json())["type"], "chat.started")
             self.assertEqual((await ws.receive_json())["type"], "chat.delta")
-            await ws.send_json({"type": "playback.state", "active": True})
             await ws.send_json(payload)
             transition = await ws.receive_json()
             self.assertEqual(transition["type"], "transition")
             self.assertEqual(transition["transition"]["fsm_event"], "PREFILL")
             self.assertFalse(transition["transition"]["interrupt"])
-            self.assertEqual(
-                transition["transition"]["parallel_decisions"]["VASD_SEM"]["label"],
-                "SEMANTIC",
-            )
-            self.assertEqual(
-                transition["transition"]["parallel_decisions"]["VASD_BREAK"]["label"],
-                "NO_BREAK",
-            )
+            self.assertEqual(transition["transition"]["semantic_label"], "SEMANTIC")
+            self.assertTrue(transition["transition"]["semantic_accepted"])
+            self.assertFalse(transition["transition"]["playback_active"])
             self.assertFalse(blocking.cancelled.is_set())
             await ws.close()
 
@@ -888,13 +858,6 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                 return VASDSemDecision(
                     True, raw_output="有", command="SEMANTIC",
                     logprobs={"SEMANTIC": -.1, "NO_SEMANTIC": -2.1},
-                    probability=.9, margin=2.0,
-                )
-
-            async def decide_break(self, audio_chunks, *, context):
-                return VASDDecision(
-                    True, raw_output="有", command="<b>",
-                    logprobs={"<b>": -.1, "</b>": -2.1},
                     probability=.9, margin=2.0,
                 )
 
@@ -985,8 +948,8 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_model_command_is_visible_and_session_stays_open(self):
         class InvalidProvider:
-            async def decide_break(self, audio_chunks, *, context):
-                raise InvalidSemanticCommand("VASD_BREAK", "有。", ("有", "无"))
+            async def decide_sem(self, audio_chunks, *, context):
+                raise InvalidSemanticCommand("VASD_SEM", "有。", ("有", "无"))
 
             async def decide_complete(self, audio_chunks, *, context):
                 return VAEDDecision(True, raw_output="<c>", command="<c>")
