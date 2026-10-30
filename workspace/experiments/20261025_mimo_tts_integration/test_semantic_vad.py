@@ -28,6 +28,7 @@ from semantic_vad import (
     SemanticVADController,
     VAEDDecision,
     VASDDecision,
+    VASDSemDecision,
     audio_chunks_to_wav,
     choose_decode_token,
     extract_semantic_vad_config,
@@ -44,9 +45,18 @@ class ScriptedProvider:
         self.completes = list(completes)
         self.calls = []
 
-    async def decide_break(self, audio_chunks, *, context):
-        self.calls.append(("break", tuple(audio_chunks), dict(context)))
-        return self.breaks.pop(0)
+    async def decide_sem(self, audio_chunks, *, context):
+        self.calls.append(("sem", tuple(audio_chunks), dict(context)))
+        legacy = self.breaks.pop(0)
+        return VASDSemDecision(
+            legacy.break_decision and not legacy.reject,
+            legacy.raw_output,
+            "SEMANTIC" if legacy.break_decision and not legacy.reject else "NO_SEMANTIC",
+            legacy.valid,
+            legacy.logprobs,
+            legacy.probability,
+            legacy.margin,
+        )
 
     async def decide_complete(self, audio_chunks, *, context):
         self.calls.append(("complete", tuple(audio_chunks), dict(context)))
@@ -139,51 +149,51 @@ class FSMTests(unittest.TestCase):
 
 
 class ControllerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_weak_break_candidate_stays_in_judge(self):
+    async def test_weak_semantic_candidate_stays_in_judge(self):
         provider = ScriptedProvider(breaks=[
             VASDDecision(True, probability=.54, margin=.25, command="<b>"),
         ])
         controller = SemanticVADController(
             provider,
-            break_probability_threshold=.8,
-            break_margin_threshold=1.5,
+            sem_probability_threshold=.8,
+            sem_margin_threshold=1.5,
         )
         output = await controller.process(chunk(1), speech=True)
         self.assertEqual((output.state, output.event), (InputState.JUDGE, InputEvent.NO_OP))
-        self.assertEqual(output.semantic_label, SemanticLabel.BREAK)
-        self.assertFalse(output.break_accepted)
-        self.assertEqual(output.break_confirmation_count, 0)
+        self.assertEqual(output.semantic_label, SemanticLabel.SEMANTIC)
+        self.assertFalse(output.semantic_accepted)
+        self.assertEqual(output.semantic_confirmation_count, 0)
 
-    async def test_break_confirmations_gate_prefill(self):
+    async def test_semantic_confirmations_gate_prefill(self):
         provider = ScriptedProvider(breaks=[
             VASDDecision(True, probability=.9, margin=2.0, command="<b>"),
             VASDDecision(True, probability=.92, margin=2.25, command="<b>"),
         ])
-        controller = SemanticVADController(provider, break_confirmations=2)
+        controller = SemanticVADController(provider, sem_confirmations=2)
         first = await controller.process(chunk(1), speech=True)
         second = await controller.process(chunk(2), speech=True)
-        self.assertEqual((first.state, first.event, first.break_confirmation_count), (
+        self.assertEqual((first.state, first.event, first.semantic_confirmation_count), (
             InputState.JUDGE, InputEvent.NO_OP, 1,
         ))
-        self.assertFalse(first.break_accepted)
-        self.assertEqual((second.state, second.event, second.break_confirmation_count), (
+        self.assertFalse(first.semantic_accepted)
+        self.assertEqual((second.state, second.event, second.semantic_confirmation_count), (
             InputState.LISTEN, InputEvent.PREFILL, 2,
         ))
-        self.assertTrue(second.break_accepted)
+        self.assertTrue(second.semantic_accepted)
 
-    async def test_no_break_resets_break_confirmation_count(self):
+    async def test_no_semantic_resets_semantic_confirmation_count(self):
         provider = ScriptedProvider(breaks=[
             VASDDecision(True, probability=.9, margin=2.0, command="<b>"),
             VASDDecision(False, probability=.9, margin=2.0, command="</b>"),
             VASDDecision(True, probability=.9, margin=2.0, command="<b>"),
         ])
-        controller = SemanticVADController(provider, break_confirmations=2)
+        controller = SemanticVADController(provider, sem_confirmations=2)
         first = await controller.process(chunk(1), speech=True)
-        no_break = await controller.process(chunk(2), speech=True)
+        no_semantic = await controller.process(chunk(2), speech=True)
         restarted = await controller.process(chunk(3), speech=True)
-        self.assertEqual(first.break_confirmation_count, 1)
-        self.assertEqual(no_break.break_confirmation_count, 0)
-        self.assertEqual(restarted.break_confirmation_count, 1)
+        self.assertEqual(first.semantic_confirmation_count, 1)
+        self.assertEqual(no_semantic.semantic_confirmation_count, 0)
+        self.assertEqual(restarted.semantic_confirmation_count, 1)
         self.assertEqual(restarted.state, InputState.JUDGE)
 
     async def test_state_specific_provider_calls_and_context(self):
@@ -209,7 +219,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             InputEvent.PREFILL, InputEvent.CHUNK_PREFILL, InputEvent.CHUNK_PREFILL,
             InputEvent.NO_OP, InputEvent.CHUNK_PREFILL, InputEvent.DECODE,
         ])
-        self.assertEqual([call[0] for call in provider.calls], ["break", "complete", "complete"])
+        self.assertEqual([call[0] for call in provider.calls], ["sem", "complete", "complete"])
         self.assertEqual(provider.calls[0][1], (chunk(1),))
         self.assertEqual(provider.calls[-1][1], tuple(chunk(i) for i in range(1, 7)))
         self.assertFalse(endpoint.completion_accepted)
@@ -227,7 +237,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         repeated = await controller.process(None, speech=False)
         self.assertEqual(output.event, InputEvent.CHUNK_PREFILL)
         self.assertEqual(repeated.event, InputEvent.NO_OP)
-        self.assertEqual([call[0] for call in provider.calls], ["break", "complete"])
+        self.assertEqual([call[0] for call in provider.calls], ["sem", "complete"])
 
     async def test_low_confidence_complete_candidate_does_not_decode(self):
         provider = ScriptedProvider(
@@ -384,8 +394,8 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
         client = FakeClient(["有", "无", "未", "已"])
         provider = MiMoSemanticVADProvider(client, "http://mimo")
-        self.assertEqual(await provider.decide_break(chunks, context={}), VASDDecision(True, False))
-        self.assertEqual(await provider.decide_break(chunks, context={}), VASDDecision(False, False))
+        self.assertEqual(await provider.decide_sem(chunks, context={}), VASDSemDecision(True))
+        self.assertEqual(await provider.decide_sem(chunks, context={}), VASDSemDecision(False))
         self.assertEqual(await provider.decide_complete(chunks, context={}), VAEDDecision(False))
         self.assertEqual(await provider.decide_complete(chunks, context={}), VAEDDecision(True))
         self.assertTrue(all(request[1]["json"]["stream"] is False for request in client.requests))
@@ -399,10 +409,10 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         pcm = base64.b64encode(b"\0\0" * 160).decode()
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
         provider = MiMoSemanticVADProvider(FakeClient(["有", "答案：已", "已 "]), "http://mimo")
-        decision = await provider.decide_break(chunks, context={})
-        self.assertEqual(decision.command, "<b>")
+        decision = await provider.decide_sem(chunks, context={})
+        self.assertEqual(decision.command, "SEMANTIC")
         self.assertEqual(decision.raw_output, "有")
-        self.assertEqual(set(decision.logprobs), {"<b>", "</b>"})
+        self.assertEqual(set(decision.logprobs), {"SEMANTIC", "NO_SEMANTIC"})
         self.assertGreater(decision.probability, .8)
         with self.assertRaises(InvalidSemanticCommand) as caught:
             await provider.decide_complete(chunks, context={})
@@ -417,7 +427,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
         provider = MiMoSemanticVADProvider(FakeClient(["有或无"]), "http://mimo")
         with self.assertRaises(ValueError):
-            await provider.decide_break(chunks, context={})
+            await provider.decide_sem(chunks, context={})
 
 
 class ConfigTests(unittest.TestCase):

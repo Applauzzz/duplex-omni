@@ -1,5 +1,12 @@
 # 当前 MiMo Semantic VAD 实现详解
 
+> 2026-10-30 superseding policy: the active runtime no longer uses a separate
+> interruption-intent VASD. Judge runs only mandatory `VASD_SEM` with
+> constrained one-token `有/无`. Accepted `有` always enters Listen/PREFILL;
+> when TTS playback is active it also sets `interrupt=true` and cancels the
+> current response. `无` remains blocked. Independent break Prompt/probability/
+> margin/confirmation settings and user/agent simultaneous speech are removed.
+
 > 2026-10-28 v0.3 工作树更新：VASD 已改为 8 秒默认滑窗的 A/B 有语义/
 > 无语义分类；首个 speech chunk 即判断。VAED 保持 AVAD speech-stop 后判定。
 > VASD 滑窗只限制分类输入，`DECODE` 必须向普通 MiMo Chat 交付本轮所有已

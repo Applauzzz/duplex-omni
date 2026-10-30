@@ -47,6 +47,19 @@
   that antagonist pair. AVAD/Silero and ordinary Chat generation are not part
   of this token-classifier contract.
 
+## 2026-10-30: Single Semantic Barge-In Policy
+- User chooses clarity over simultaneous user/agent speech. The independent
+  interruption-intent classifier is removed. VASD_SEM remains mandatory and
+  is the sole Judge classifier: accepted `有` always admits audio; during TTS
+  playback that same admission also interrupts the active response.
+- Consequently there is no `SEMANTIC + NO_BREAK` state. Non-semantic/noise
+  remains blocked, semantic speech while idle proceeds normally, and semantic
+  speech during playback becomes unconditional barge-in.
+- Remove VASD_BREAK Prompt/config/provider/telemetry/UI rather than retaining
+  dead compatibility controls. Keep the internal interruption event and
+  retention marker because accepted semantic playback barge-in still cancels
+  and may preserve partial assistant output.
+
 ## Realtime Runner Integration Recovery
 - Recovery prompt snapshots from vadtest04 confirm Qwen final media-first
   formatting moves latest audio ahead of the unanswered old city text.

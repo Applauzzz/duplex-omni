@@ -20,7 +20,7 @@ async def main() -> None:
     parser.add_argument("--wav", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--playback-active", action="store_true")
-    parser.add_argument("--stop-after-parallel", action="store_true")
+    parser.add_argument("--stop-after-semantic", action="store_true")
     args = parser.parse_args()
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -66,24 +66,22 @@ async def main() -> None:
                     events.append(event)
                     if event.get("type") in {"transition", "semantic_error", "error"}:
                         transition = event.get("transition")
-                        return bool(
-                            isinstance(transition, dict)
-                            and transition.get("parallel_decisions")
-                        )
+                        return bool(isinstance(transition, dict)
+                                    and transition.get("request_kind") == "VASD_SEM")
 
-            stopped_after_parallel = False
+            stopped_after_semantic = False
             for chunk in chunks:
-                if await send_audio(chunk) and args.stop_after_parallel:
-                    stopped_after_parallel = True
+                if await send_audio(chunk) and args.stop_after_semantic:
+                    stopped_after_semantic = True
                     break
-            if not stopped_after_parallel:
+            if not stopped_after_semantic:
                 for _ in range(4):
-                    if await send_audio(silence) and args.stop_after_parallel:
-                        stopped_after_parallel = True
+                    if await send_audio(silence) and args.stop_after_semantic:
+                        stopped_after_semantic = True
                         break
 
             try:
-                if stopped_after_parallel:
+                if stopped_after_semantic:
                     raise TimeoutError
                 async with asyncio.timeout(45):
                     while True:
@@ -92,7 +90,7 @@ async def main() -> None:
                         if event.get("type") in {"chat.done", "chat.error", "error"}:
                             break
             except TimeoutError:
-                if stopped_after_parallel:
+                if stopped_after_semantic:
                     pass
                 else:
                     events.append({"type": "probe.timeout"})
@@ -104,7 +102,7 @@ async def main() -> None:
         "playback_active": args.playback_active,
         "sample_rate_hz": sample_rate_hz,
         "audio_chunks": len(chunks),
-        "stopped_after_parallel": stopped_after_parallel,
+        "stopped_after_semantic": stopped_after_semantic,
         "event_types": [event.get("type") for event in events],
         "transitions": [event.get("transition") for event in events
                         if event.get("type") == "transition"],

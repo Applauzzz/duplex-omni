@@ -1125,3 +1125,44 @@ are preserved separately. GPU service/API operations used explicit escalation.
   first explicit `git add` failed before changing the index because the sandbox
   exposed `.git/index.lock` as read-only. Retry the same exact path list with
   Git write approval; this is not a conflict and no lock file was created.
+
+## 2026-10-30: Simplify To Semantic-Only Barge-In
+- User requested regression from parallel semantic-admission/interruption
+  intent to one mandatory VASD_SEM classifier and explicitly abandons
+  simultaneous user/agent speech. Scope recorded before edits: remove all
+  independent VASD_BREAK requests, Prompt, thresholds, confirmations,
+  telemetry and UI; accepted semantic speech during playback directly sets
+  interrupt while still entering Listen/PREFILL.
+- Starting Git state is clean at pushed checkpoint `e95473c` except the
+  intentionally untracked, unreferenced `wx_tts_ref.py`; both submodules remain
+  unchanged. Live `svad25` is the owned 8080 service to roll after validation.
+- Implemented the semantic-only policy across controller, provider surface,
+  config schema/JSON, service protocol, frontend, probe and focused tests.
+  Production Judge now makes exactly one `decide_sem` request. Accepted
+  semantics set interrupt iff browser TTS playback is active; no separate
+  break thresholds, confirmations, Prompt, request or telemetry remain.
+- Python and inline JavaScript syntax, source residual scan and
+  `git diff --check` pass. Five unique focused entries pass: one-token semantic
+  provider, page/config surface, playback-active semantic cancellation,
+  playback-inactive semantic admission, and interrupted-context retention.
+  Existing aiohttp AppKey/deprecation warnings remain.
+- Updated the active Stage 4 plan and added 2026-10-30 superseding policy notes
+  to the Stage 4 README/current implementation record. Historical sections and
+  progress evidence remain preserved but are explicitly not the active policy.
+- Rolled only the owned 8080 UI from `svad25` to `svad26`; `svad25` exited 0.
+  MiMo 8090 and external TTS 8100 were preserved. `svad26` health reports both
+  dependencies ready. Live `/defaults` contains only `vasd_sem_prompt` and
+  `sem_*` policy fields; the page exposes only required VASD_SEM and labels
+  semantic+playback as immediate barge-in.
+- Fresh real artifact `live_svad_probe_20261030T072405Z_24456131` proves the
+  simplified production path. One playback-active speech window generated one
+  `VASD_SEM` request, raw one-token `有`, normalized probability 0.999769 and
+  margin 8.375. The returned Judge -> Listen transition has
+  `semantic_accepted=true`, `playback_active=true`, `interrupt=true`; commands
+  are `barge_in` then `input_audio_buffer.append`. The svad26 log contains no
+  VASD_BREAK request. This intentionally removes simultaneous user/agent speech.
+- During publication fetch, `origin/feature/SVAD` advanced from `e95473c` to
+  merge commit `1f17bb1` (via main merge `e654713`). Read-only comparison shows
+  no file-tree diff from local HEAD and no overlap with the 13 modified files;
+  this is history topology only. Commit the local policy simplification first,
+  then merge the remote branch normally and push without force/rebase.

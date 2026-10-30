@@ -1,5 +1,12 @@
 # Stage 4: MiMo Semantic VAD
 
+> 2026-10-30 policy update: the active implementation uses one mandatory
+> `VASD_SEM` classifier. `无` rejects the candidate; accepted `有` enters
+> Listen/PREFILL. If browser TTS playback is active, the same accepted result
+> immediately interrupts MiMo generation, TTS polling and browser playback.
+> There is no independent `VASD_BREAK` request and no simultaneous
+> user/assistant speech mode. VAED and interrupted-context retention remain.
+
 This stage adds the specified acoustic + semantic input controller on branch
 `feature/SVAD`. The normative behavior remains
 `duplex_input_fsm_function_spec.md`; this document describes the repository

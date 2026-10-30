@@ -18,7 +18,6 @@ from backend import client_timeout
 from semantic_vad import (
     DEFAULT_CHAT_PROMPT,
     DEFAULT_VAED_PROMPT,
-    DEFAULT_VASD_BREAK_PROMPT,
     DEFAULT_VASD_SEM_PROMPT,
     INTERRUPTION_MARKER,
     InvalidSemanticCommand,
@@ -71,8 +70,6 @@ def load_local_settings(path: Path) -> dict[str, object]:
     prompts = {}
     prompt_defaults = {
         "vasd_sem_prompt": DEFAULT_VASD_SEM_PROMPT,
-        "vasd_break_prompt": raw_prompts.get(
-            "vasd_prompt", DEFAULT_VASD_BREAK_PROMPT),
         "vaed_prompt": DEFAULT_VAED_PROMPT,
         "chat_prompt": DEFAULT_CHAT_PROMPT,
     }
@@ -131,9 +128,6 @@ def load_local_settings(path: Path) -> dict[str, object]:
             "sem_probability_threshold": config.sem_probability_threshold,
             "sem_margin_threshold": config.sem_margin_threshold,
             "sem_confirmations": config.sem_confirmations,
-            "break_probability_threshold": config.break_probability_threshold,
-            "break_margin_threshold": config.break_margin_threshold,
-            "break_confirmations": config.break_confirmations,
             "complete_probability_threshold": config.complete_probability_threshold,
             "complete_margin_threshold": config.complete_margin_threshold,
             "complete_confirmations": config.complete_confirmations,
@@ -463,9 +457,6 @@ async def websocket(request):
                     "sem_probability_threshold": payload.get("sem_probability_threshold", local_config["sem_probability_threshold"]),
                     "sem_margin_threshold": payload.get("sem_margin_threshold", local_config["sem_margin_threshold"]),
                     "sem_confirmations": payload.get("sem_confirmations", local_config["sem_confirmations"]),
-                    "break_probability_threshold": payload.get("break_probability_threshold", local_config["break_probability_threshold"]),
-                    "break_margin_threshold": payload.get("break_margin_threshold", local_config["break_margin_threshold"]),
-                    "break_confirmations": payload.get("break_confirmations", local_config["break_confirmations"]),
                     "complete_probability_threshold": payload.get("complete_probability_threshold", local_config["complete_probability_threshold"]),
                     "complete_margin_threshold": payload.get("complete_margin_threshold", local_config["complete_margin_threshold"]),
                     "complete_confirmations": payload.get("complete_confirmations", local_config["complete_confirmations"]),
@@ -541,9 +532,6 @@ async def websocket(request):
                         "sem_probability_threshold": config.sem_probability_threshold,
                         "sem_margin_threshold": config.sem_margin_threshold,
                         "sem_confirmations": config.sem_confirmations,
-                        "break_probability_threshold": config.break_probability_threshold,
-                        "break_margin_threshold": config.break_margin_threshold,
-                        "break_confirmations": config.break_confirmations,
                         "complete_probability_threshold": config.complete_probability_threshold,
                         "complete_margin_threshold": config.complete_margin_threshold,
                         "complete_confirmations": config.complete_confirmations,
