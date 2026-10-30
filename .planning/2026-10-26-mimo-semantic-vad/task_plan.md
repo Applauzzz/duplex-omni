@@ -6,10 +6,10 @@ using acoustic VAD plus Omni-backed VASD/VAED interfaces to emit ordered
 PREFILL, CHUNK_PREFILL and DECODE events without changing the specified FSM.
 
 ## Next Step
-Run user browser acceptance against `svad12` with the Beijing pause/resume
-example. Confirm the first endpoint returns `</c>` and remains Listen, resumed
-speech stays in the same turn, and a later accepted `<c>` triggers one DECODE.
-Do not commit or push until the user accepts the behavior.
+Split VASD into parallel semantic-admission and interruption-intent decisions.
+Use semantic admission to enter Listen, consult interruption intent only while
+browser TTS playback is active, and add configurable retention of interrupted
+assistant text with a verified one-token interruption marker in MiMo history.
 
 ## Current Phase
 Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
@@ -62,6 +62,43 @@ Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
 - [x] Verify semantic classification remains independent from Chat generation
 - **Status:** in_progress
 
+### Phase 7: Sliding Semantic Window And Complete-Context Chat Contract
+- [x] Add duration-aware VASD sliding window without truncating inference context
+- [x] Replace VASD A/B/C with masked A/B semantic/no-semantic classification
+- [x] Preserve VAED only after AVAD speech-stop silence
+- [x] Pass every SVAD-accepted chunk from the complete user turn to Chat at DECODE
+- [x] Remove the experimental LISTENING/GENERATE classifier and KV sidecar
+- [x] Defer native MiMo request/KV reuse as a separate backend capability
+- **Status:** complete
+
+### Phase 8: MiMo Text To Streaming TTS
+- [x] Implement the `/submit` + `/poll` PCM16 Audio Engine contract from `wx_tts_ref.py`
+- [x] Segment MiMo text incrementally and synthesize segments in order
+- [x] Stream typed TTS PCM events over the existing SVAD WebSocket
+- [x] Add browser PCM scheduling and deterministic playback cancellation
+- [x] Expose local TTS enable/reg-ID/speed/target-RMS settings without changing prompts
+- [x] Verify text-only fallback, TTS errors, cancellation and live service wiring
+- **Status:** complete
+
+### Phase 9: Incremental Text Streaming Within One TTS Task
+- [x] Verify live multi-submit `text_idx` ordering and concurrent polling
+- [x] Reuse one TTS task ID across all MiMo text chunks in a response
+- [x] Add bounded low-latency text chunking before sentence completion
+- [x] Submit an explicit final text chunk without duplicating content
+- [x] Preserve TTS failure fallback and BREAK/playback cancellation semantics
+- [x] Prove PCM can arrive before `chat.done` on a controlled streamed reply
+- **Status:** complete
+
+### Phase 10: Dual VASD And Interrupted-Reply Context
+- [ ] Add independent VASD_SEM and VASD_BREAK prompts/providers/telemetry
+- [ ] Gate Judge -> Listen on VASD_SEM rather than interruption intent
+- [ ] Report browser TTS playback active/inactive to the service
+- [ ] Interrupt MiMo/TTS/playback only when VASD_BREAK is accepted during playback
+- [ ] Add a config switch for retaining interrupted assistant context
+- [ ] Append a verified one-token interruption marker to retained partial text
+- [ ] Explain marker semantics in the Chat prompt and test next-turn history
+- **Status:** in_progress
+
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
@@ -81,6 +118,13 @@ Phase 5: Live FSM + AVAD + semantic VAD browser acceptance.
 | Allow Listen to span semantic-incomplete silence | Supports `[</c>, </s>]` followed by resumed speech in the same user turn |
 | Use an external incomplete-silence timeout | Prevents an incomplete semantic turn from waiting forever without adding a fourth FSM state |
 | Publish the current snapshot with browser long-utterance acceptance still open | User explicitly requested commit and push; preserve the open acceptance item rather than claiming it passed |
+| Keep VASD window separate from inference context | Classification needs bounded recent evidence; downstream reasoning must retain every accepted audio chunk |
+| Treat MiMo incremental prefill as a backend capability gate | Current plugin rejects `final=False`; append buffering or repeated cumulative HTTP requests are not model-side KV reuse |
+| Keep rejection inside the Chat Prompt for now | User requires normal complete-context management and does not want a second inference classifier or KV sidecar gate |
+| Keep TTS downstream of completed text segments | TTS renders MiMo output only; it must not affect semantic VAD decisions, accepted audio context or conversation history |
+| Cancel one response task across Chat and TTS | A new effective BREAK must close MiMo/TTS streams and invalidate browser playback for the interrupted response |
+| Treat Audio Engine cancellation as client-side only | The deployed CosyVoice API exposes submit/poll but no task-cancel endpoint; BREAK stops polling and browser playback, while an already submitted upstream task may finish server-side |
+| Use `EagerTTSStrategy` for true streaming | Live A/B showed SmartSplit withheld PCM until final text completion, while Eager emitted first PCM about 202ms after the first non-final text chunk |
 
 ## Errors Encountered
 | Error | Resolution |

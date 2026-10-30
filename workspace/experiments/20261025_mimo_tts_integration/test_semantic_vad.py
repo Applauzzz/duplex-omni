@@ -148,8 +148,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             break_probability_threshold=.8,
             break_margin_threshold=1.5,
         )
-        await controller.process(chunk(1), speech=True)
-        output = await controller.process(chunk(2), speech=True)
+        output = await controller.process(chunk(1), speech=True)
         self.assertEqual((output.state, output.event), (InputState.JUDGE, InputEvent.NO_OP))
         self.assertEqual(output.semantic_label, SemanticLabel.BREAK)
         self.assertFalse(output.break_accepted)
@@ -161,9 +160,8 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             VASDDecision(True, probability=.92, margin=2.25, command="<b>"),
         ])
         controller = SemanticVADController(provider, break_confirmations=2)
-        await controller.process(chunk(1), speech=True)
-        first = await controller.process(chunk(2), speech=True)
-        second = await controller.process(chunk(3), speech=True)
+        first = await controller.process(chunk(1), speech=True)
+        second = await controller.process(chunk(2), speech=True)
         self.assertEqual((first.state, first.event, first.break_confirmation_count), (
             InputState.JUDGE, InputEvent.NO_OP, 1,
         ))
@@ -180,10 +178,9 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             VASDDecision(True, probability=.9, margin=2.0, command="<b>"),
         ])
         controller = SemanticVADController(provider, break_confirmations=2)
-        await controller.process(chunk(1), speech=True)
-        first = await controller.process(chunk(2), speech=True)
-        no_break = await controller.process(chunk(3), speech=True)
-        restarted = await controller.process(chunk(4), speech=True)
+        first = await controller.process(chunk(1), speech=True)
+        no_break = await controller.process(chunk(2), speech=True)
+        restarted = await controller.process(chunk(3), speech=True)
         self.assertEqual(first.break_confirmation_count, 1)
         self.assertEqual(no_break.break_confirmation_count, 0)
         self.assertEqual(restarted.break_confirmation_count, 1)
@@ -198,9 +195,9 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         controller = SemanticVADController(provider)
-        await controller.process(chunk(1), speech=True, context={"request_id": "r"})
-        prefill = await controller.process(chunk(2), speech=True, context={"request_id": "r"})
-        incremental = await controller.process(chunk(3), speech=True, context={"request_id": "r"})
+        prefill = await controller.process(chunk(1), speech=True, context={"request_id": "r"})
+        incremental = await controller.process(chunk(2), speech=True, context={"request_id": "r"})
+        await controller.process(chunk(3), speech=True, context={"request_id": "r"})
         endpoint = await controller.process(
             chunk(4), speech=False, speech_stopped=True, context={"request_id": "r"})
         waiting = await controller.process(None, speech=False, context={"request_id": "r"})
@@ -213,7 +210,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             InputEvent.NO_OP, InputEvent.CHUNK_PREFILL, InputEvent.DECODE,
         ])
         self.assertEqual([call[0] for call in provider.calls], ["break", "complete", "complete"])
-        self.assertEqual(provider.calls[0][1], (chunk(1), chunk(2)))
+        self.assertEqual(provider.calls[0][1], (chunk(1),))
         self.assertEqual(provider.calls[-1][1], tuple(chunk(i) for i in range(1, 7)))
         self.assertFalse(endpoint.completion_accepted)
         self.assertTrue(decoded.completion_accepted)
@@ -275,7 +272,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         ))
 
     async def test_silence_is_logged_as_one_interval(self):
-        provider = ScriptedProvider()
+        provider = ScriptedProvider(breaks=[VASDDecision(False)])
         controller = SemanticVADController(provider)
         with self.assertLogs("mimo_tts.semantic_vad", level="INFO") as captured:
             for index in range(4):
@@ -286,9 +283,31 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(intervals), 1)
         self.assertIn('"audio_chunk_count": 4', intervals[0])
         self.assertIn('"session_id": "svad-log"', intervals[0])
-        self.assertEqual(len(transitions), 1)
+        self.assertEqual(len(transitions), 2)
         self.assertIn('"previous_state": "Silence"', transitions[0])
         self.assertIn('"next_state": "Judge"', transitions[0])
+        self.assertIn('"request_kind": "VASD"', transitions[1])
+
+    async def test_vasd_uses_duration_bounded_sliding_window_but_keeps_full_candidate(self):
+        def audio_chunk(index):
+            pcm = index.to_bytes(2, "little", signed=True) * 8000
+            return {
+                "id": index,
+                "audio": base64.b64encode(pcm).decode(),
+                "format": "pcm16",
+                "sample_rate_hz": 16000,
+            }
+
+        provider = ScriptedProvider(breaks=[VASDDecision(False)] * 17)
+        controller = SemanticVADController(provider, vasd_window_ms=8000)
+        chunks = [audio_chunk(index) for index in range(17)]
+        for item in chunks:
+            output = await controller.process(item, speech=True)
+            self.assertEqual(output.state, InputState.JUDGE)
+        self.assertEqual(provider.calls[0][1], (chunks[0],))
+        self.assertEqual(provider.calls[15][1], tuple(chunks[:16]))
+        self.assertEqual(provider.calls[16][1], tuple(chunks[1:17]))
+        self.assertEqual(controller.fsm.candidate_audio, tuple(chunks))
 
 
 class SpeakDecisionTests(unittest.TestCase):
@@ -337,7 +356,7 @@ class FakeResponse:
         if isinstance(self.content, dict):
             return self.content
         sampled = self.content.strip()
-        scores = {"A": -3.0, "B": -3.0, "C": -3.0}
+        scores = {"有": -3.0, "无": -3.0, "已": -3.0, "未": -3.0}
         if sampled in scores:
             scores[sampled] = -0.1
         return {"choices": [{
@@ -360,39 +379,43 @@ class FakeClient:
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_mimo_labels_and_reject(self):
+    async def test_mimo_binary_vasd_and_vaed_labels(self):
         pcm = base64.b64encode(b"\0\0" * 160).decode()
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
-        client = FakeClient(["A", "C", "B", "A"])
+        client = FakeClient(["有", "无", "未", "已"])
         provider = MiMoSemanticVADProvider(client, "http://mimo")
         self.assertEqual(await provider.decide_break(chunks, context={}), VASDDecision(True, False))
-        self.assertEqual(await provider.decide_break(chunks, context={}), VASDDecision(False, True))
+        self.assertEqual(await provider.decide_break(chunks, context={}), VASDDecision(False, False))
         self.assertEqual(await provider.decide_complete(chunks, context={}), VAEDDecision(False))
         self.assertEqual(await provider.decide_complete(chunks, context={}), VAEDDecision(True))
         self.assertTrue(all(request[1]["json"]["stream"] is False for request in client.requests))
-        self.assertEqual(client.requests[0][1]["json"]["allowed_token_ids"], [32, 33, 34])
-        self.assertEqual(client.requests[0][1]["json"]["logprob_token_ids"], [32, 33, 34])
-        self.assertEqual(client.requests[-1][1]["json"]["allowed_token_ids"], [32, 33])
+        self.assertEqual(client.requests[0][1]["json"]["allowed_token_ids"], [18830, 42192])
+        self.assertEqual(client.requests[0][1]["json"]["logprob_token_ids"], [18830, 42192])
+        self.assertEqual(client.requests[2][1]["json"]["allowed_token_ids"], [36667, 38342])
+        self.assertEqual(client.requests[-1][1]["json"]["allowed_token_ids"], [36667, 38342])
         self.assertTrue(all(request[1]["json"]["max_tokens"] == 1 for request in client.requests))
 
-    async def test_single_code_is_valid_but_explanations_are_invalid(self):
+    async def test_exact_chinese_code_is_valid_but_whitespace_and_explanations_are_invalid(self):
         pcm = base64.b64encode(b"\0\0" * 160).decode()
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
-        provider = MiMoSemanticVADProvider(FakeClient(["A", "Answer: A"]), "http://mimo")
+        provider = MiMoSemanticVADProvider(FakeClient(["有", "答案：已", "已 "]), "http://mimo")
         decision = await provider.decide_break(chunks, context={})
         self.assertEqual(decision.command, "<b>")
-        self.assertEqual(decision.raw_output, "A")
-        self.assertEqual(set(decision.logprobs), {"<b>", "</b>", "REJECT"})
+        self.assertEqual(decision.raw_output, "有")
+        self.assertEqual(set(decision.logprobs), {"<b>", "</b>"})
         self.assertGreater(decision.probability, .8)
         with self.assertRaises(InvalidSemanticCommand) as caught:
             await provider.decide_complete(chunks, context={})
-        self.assertEqual(caught.exception.raw_output, "Answer: A")
-        self.assertEqual(caught.exception.allowed, ("<c>", "</c>"))
+        self.assertEqual(caught.exception.raw_output, "答案：已")
+        self.assertEqual(caught.exception.allowed, ("已", "未"))
+        with self.assertRaises(InvalidSemanticCommand) as caught:
+            await provider.decide_complete(chunks, context={})
+        self.assertEqual(caught.exception.raw_output, "已 ")
 
     async def test_ambiguous_model_output_is_rejected(self):
         pcm = base64.b64encode(b"\0\0" * 160).decode()
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
-        provider = MiMoSemanticVADProvider(FakeClient(["A or B"]), "http://mimo")
+        provider = MiMoSemanticVADProvider(FakeClient(["有或无"]), "http://mimo")
         with self.assertRaises(ValueError):
             await provider.decide_break(chunks, context={})
 
@@ -471,17 +494,17 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         first, commands = await adapter.process_append(
             self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
-        self.assertEqual((first.state, commands), (InputState.JUDGE, []))
-        prefill, commands = await adapter.process_append(
-            self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
-        self.assertEqual(prefill.event, InputEvent.PREFILL)
+        self.assertEqual(first.event, InputEvent.PREFILL)
         self.assertEqual([item["type"] for item in commands], [
-            "barge_in", "input_audio_buffer.append", "input_audio_buffer.append",
+            "barge_in", "input_audio_buffer.append",
         ])
         incremental, commands = await adapter.process_append(
             self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
         self.assertEqual(incremental.event, InputEvent.CHUNK_PREFILL)
         self.assertEqual([item["type"] for item in commands], ["input_audio_buffer.append"])
+        incremental, commands = await adapter.process_append(
+            self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
+        self.assertEqual(incremental.event, InputEvent.CHUNK_PREFILL)
         decoded, commands = await adapter.process_append(
             self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
         self.assertEqual(decoded.event, InputEvent.DECODE)
@@ -489,22 +512,25 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             "input_audio_buffer.append", "input_audio_buffer.commit",
         ])
 
-    async def test_reject_does_not_dispatch_audio_or_interrupt(self):
-        provider = ScriptedProvider(breaks=[VASDDecision(True, True)])
+    async def test_no_semantic_does_not_dispatch_audio_or_interrupt(self):
+        provider = ScriptedProvider(breaks=[VASDDecision(False), VASDDecision(False)])
         adapter = SemanticRealtimeAdapter(
             SemanticVADConfig(min_speech_duration_ms=32),
             provider,
             vad=self.AlwaysSpeechVAD(),
         )
-        await adapter.process_append(
-            self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
         output, commands = await adapter.process_append(
             self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
-        self.assertEqual(output.semantic_label, SemanticLabel.REJECT)
+        self.assertEqual(output.semantic_label, SemanticLabel.NO_BREAK)
+        self.assertEqual(output.state, InputState.JUDGE)
+        self.assertEqual(commands, [])
+        output, commands = await adapter.process_append(
+            self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
+        self.assertEqual(output.semantic_label, SemanticLabel.NO_BREAK)
         self.assertEqual(commands, [])
 
     async def test_reset_clears_fsm_and_avad(self):
-        provider = ScriptedProvider()
+        provider = ScriptedProvider(breaks=[VASDDecision(False)])
         vad = self.AlwaysSpeechVAD()
         adapter = SemanticRealtimeAdapter(
             SemanticVADConfig(min_speech_duration_ms=32),
@@ -541,12 +567,13 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((output.state, commands), (InputState.SILENCE, []))
         output, commands = await adapter.process_append(
             second, default_format="pcm16", default_sample_rate_hz=16000)
-        self.assertEqual((output.state, commands), (InputState.JUDGE, []))
+        self.assertEqual(output.event, InputEvent.PREFILL)
+        self.assertEqual(output.prefill_audio, (first, second))
         third = self.audio()
         output, commands = await adapter.process_append(
             third, default_format="pcm16", default_sample_rate_hz=16000)
-        self.assertEqual(output.event, InputEvent.PREFILL)
-        self.assertEqual(output.prefill_audio, (first, second, third))
+        self.assertEqual(output.event, InputEvent.CHUNK_PREFILL)
+        self.assertEqual(output.prefill_audio, (third,))
 
     async def test_decode_tail_is_not_reused_as_next_turn_prefix(self):
         class ScriptedVAD:
@@ -580,11 +607,12 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         decoded, _ = await adapter.process_append(
             chunks[2], default_format="pcm16", default_sample_rate_hz=16000)
         self.assertEqual(decoded.event, InputEvent.DECODE)
-        await adapter.process_append(
-            chunks[3], default_format="pcm16", default_sample_rate_hz=16000)
         prefill, _ = await adapter.process_append(
+            chunks[3], default_format="pcm16", default_sample_rate_hz=16000)
+        self.assertEqual(prefill.prefill_audio, (chunks[3],))
+        incremental, _ = await adapter.process_append(
             chunks[4], default_format="pcm16", default_sample_rate_hz=16000)
-        self.assertEqual(prefill.prefill_audio, (chunks[3], chunks[4]))
+        self.assertEqual(incremental.prefill_audio, (chunks[4],))
 
     async def test_incomplete_pause_resumes_same_listen_turn_then_decodes(self):
         class ScriptedVAD:
@@ -620,7 +648,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             outputs.append(output)
             commands.append(_commands)
         self.assertEqual([item.state for item in outputs], [
-            InputState.JUDGE, InputState.LISTEN, InputState.LISTEN,
+            InputState.LISTEN, InputState.LISTEN, InputState.LISTEN,
             InputState.LISTEN, InputState.LISTEN, InputState.LISTEN,
             InputState.SILENCE,
         ])

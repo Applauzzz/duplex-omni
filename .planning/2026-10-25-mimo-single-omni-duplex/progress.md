@@ -926,3 +926,202 @@ are preserved separately. GPU service/API operations used explicit escalation.
 - Broader phase gates remain open exactly as recorded: voice consistency,
   actual browser microphone/playback, strict stage idle, acoustic/semantic
   policy and performance acceptance. No fresh GPU replay is claimed.
+
+## 2026-10-29: New Session Recovery And State-Machine Scope
+- Explicitly resolved the existing plan with
+  `PLAN_ID=2026-10-25-mimo-single-omni-duplex` and the project-root pin; read
+  its task plan, findings and progress without initialization or overwrite.
+- Parent Git is on `feature/SVAD...origin/feature/SVAD`. The worktree already
+  has uncommitted Stage 4/SVAD planning, documentation, semantic VAD, debug
+  server/UI, focused tests and streaming-TTS changes. Both submodule gitlinks
+  remain at their recorded commits. No existing change was reverted.
+- Read Stage 3 recovery/design records and the related Stage 4 plan/docs/diffs.
+  The dirty implementation already has parallel semantic/break decision and
+  interrupted-context-retention scaffolding, but its state behavior and tests
+  are not yet accepted for the user's new requirements.
+- Implementation scope recorded before code edits: semantic admission gates
+  Judge -> Listen; break intent is evaluated only during active TTS playback;
+  accepted break cancels MiMo/TTS; configurable retention appends the verified
+  one-token marker to generated partial assistant text and adds explicit MiMo
+  next-turn semantics. Default remains discard-on-interrupt.
+- Test scope: no broad fixture rerun. Use at most five directly related test
+  entry points, prioritizing WebSocket end-to-end transitions, cancellation,
+  retained history and prompt behavior.
+- Pre-edit baseline used the required `env.sh` then `conda activate omni`.
+  Two pure provider/controller tests passed. The first WebSocket attempt failed
+  because sandbox socket creation is prohibited (`PermissionError errno 1`),
+  so subsequent aiohttp tests used explicit local-socket approval. One requested
+  unittest method name did not exist; it was not retried.
+- Added focused coverage in `test_svad_debug.py` without replacing the recovered
+  implementation: provider fixtures now expose `decide_sem`, the effective
+  break scenario reports browser playback active, and new WebSocket scenarios
+  verify semantic NO_BREAK admission and retained interruption history/prompt.
+- Initial WebSocket assertions assumed an extra Judge chunk and failed because
+  the adapter legitimately performs Judge classification on the first new
+  active chunk. Assertions were changed to consume protocol events by type.
+  The first semantic-NO_BREAK fixture timed out because its VAED decision lacked
+  probability/margin and therefore correctly failed the production threshold;
+  the fixture was corrected to `.95/3.0` rather than changing runtime policy.
+- Syntax check passed for `semantic_vad.py`, `svad_debug_server.py`,
+  `test_svad_debug.py` and `test_semantic_vad.py` with `python -B -m py_compile`.
+- Five unique focused unittest entry points passed in the omni interpreter:
+  `ProviderTests.test_mimo_binary_vasd_and_vaed_labels`,
+  `ControllerTests.test_state_specific_provider_calls_and_context`,
+  `DebugServiceTests.test_effective_break_cancels_active_chat`,
+  `DebugServiceTests.test_retained_interrupt_marker_is_visible_to_next_chat`,
+  and `DebugServiceTests.test_semantic_non_break_is_admitted_without_cancelling_chat`.
+  Existing aiohttp AppKey/deprecation warnings remain; no test failure remains.
+- `git diff --check` passed. No full unit suite, GPU service startup, real model
+  request, browser microphone/playback validation, commit or push was performed.
+  Phase 5 stays in progress pending those wider acceptance gates.
+
+## 2026-10-29: Live Service Takeover Audit
+- User requested live service testing and authorized takeover or restart as
+  appropriate. Read-only ownership audit found a healthy project-owned MiMo
+  TP4 service on loopback 8090: supervisor 42091, child/PGID 42095, run
+  `20261026T105528Z_mimo_single_phase2_daaf8fb0`, CUDA devices 0-3 and the
+  expected immutable runtime overlay. Direct no-proxy `/v1/models` returned
+  HTTP 200 for `mimo-v2.6-flash`; do not restart this expensive model service.
+- External streaming TTS at `29.213.195.135:8100` returned HTTP 200 from
+  `/health`, with scheduler/worker healthy and no active session. It is not a
+  local owned process and will not be stopped or restarted.
+- Existing project-owned SVAD UI on 8080 is supervisor 403725 and child/PGID
+  403729 from run `20261029T110613Z_mimo_single_phase2_bf96b206`, attempt
+  `svad20`. It executes this worktree's script but was started at 11:06 UTC,
+  before the current in-memory configuration/schema changes.
+- Direct no-proxy `/defaults` on old 8080 returned HTTP 500:
+  `Unknown semantic_vad field(s): retain_interrupted_context,
+  sem_confirmations, sem_margin_threshold, sem_probability_threshold`.
+  Its logs still report legacy `request_kind=VASD` rather than parallel
+  `VASD_SEM/VASD_BREAK`. Therefore the UI cannot be safely adopted in place.
+- Operational scope before mutation: preserve MiMo 8090 and external TTS 8100;
+  create a new exclusive run directory; send SIGINT only to verified owned
+  SVAD supervisor 403725 (which forwards to child PGID 403729); confirm port
+  8080 release; start current code as `svad21`; validate health/default schema
+  and real classifier telemetry. No unknown process or model service is touched.
+- Created exclusive run
+  `workspace/logs/20261029T153733Z_mimo_single_phase2_64fdf1db`. Verified owned
+  supervisor 403725 received SIGINT, old child 403729 exited, and direct probes
+  found 8080 released (`connect_ex=111`). MiMo and external TTS stayed healthy.
+- First restart attempt `svad21` used a detached `nohup ... &` command. The host
+  reaped the background shell before Python entered `run_service.py`: no launch,
+  service log or exit artifact was created, supervisor output stayed empty and
+  8080 remained closed. This is a launch-mechanism failure, not an application
+  error. Do not repeat detached-shell startup; use a host-tracked foreground PTY
+  session with a new attempt name and preserve the empty failed attempt evidence.
+- Started `svad22` in host-tracked PTY session 39020. Supervisor 425105 launched
+  child/PGID 425221 and wrote immutable launch metadata/logs under the new run.
+  Torch/vLLM patch and Silero initialization took about 83 seconds. Direct
+  `/health` then returned `mimo=true`, `tts=true`, latency 11.5 ms and mode
+  `fsm-avad-semantic-vad`. Direct `/defaults` returned HTTP 200 with the current
+  `sem_*`, `retain_interrupted_context`, `vasd_sem_prompt` and
+  `vasd_break_prompt` schema. MiMo 8090 was adopted without restart.
+- Added `probe_svad_live.py`, a no-clobber WAV/WebSocket probe that creates an
+  exclusive artifact directory. The preserved input fixture is mono PCM16 at
+  24 kHz; the probe was corrected to retain its native sample rate instead of
+  assuming 16 kHz. This correction did not alter the fixture.
+- Real MiMo probe with browser playback reported active produced parallel
+  decisions on the same window: `VASD_SEM=SEMANTIC` probability 0.999769,
+  margin 8.375; `VASD_BREAK=NO_BREAK` probability 0.966914, margin 3.375.
+  The FSM emitted PREFILL with `interrupt=false`, then VAED accepted COMPLETE
+  at probability 0.997527/margin 6.0 and emitted DECODE. This is fresh real-model
+  evidence that semantic speech is admitted without falsely interrupting.
+- The probe kept playback active after DECODE, so the server correctly queued
+  Chat and the client exited without writing its summary; the exclusive empty
+  directory `live_svad_probe_20261029T154634Z_680aa171` is preserved. Server
+  logs are the accepted raw evidence for this run. Do not claim a Chat/TTS audio
+  response from this probe. Browser microphone, true active-response BREAK and
+  interrupted-context listening acceptance remain for interactive testing.
+- User clarified that VASD_SEM is mandatory and must not be hidden; only
+  `retain_interrupted_context` is optional. The backend already matched this
+  rule: Judge always runs `decide_sem`, while `decide_break` is conditional on
+  reported TTS playback. The missing surface was the stale frontend.
+- Updated `svad_debug.html` to expose required SEM probability/margin/
+  confirmations, separate VASD_SEM and VASD_BREAK Prompts, parallel decision
+  panels, and the optional interrupted-context checkbox. Settings now submit
+  the exact `sem_*`, `vasd_sem_prompt`, `vasd_break_prompt` and retention keys.
+- Added browser PCM lifecycle reporting through `playback.state`. The first
+  broad HTML patch failed exact-context verification and changed nothing; it
+  was split into smaller exact patches. The first focused page test then failed
+  only because its historical graph assertion still required `<b>/</b>` as the
+  Judge transition. The assertion was updated to `SEMANTIC/NO_SEMANTIC` and the
+  same test passed. Inline JavaScript syntax and `git diff --check` pass.
+- Live 8080 serves the updated static page without restart. Direct inspection
+  confirms `semProbability`, `semMargin`, `semConfirmations`,
+  `vasdSemPrompt`, `vasdBreakPrompt`, `retainInterruptedContext`, both decision
+  labels and playback-state reporting. `/health` remains MiMo/TTS true.
+
+## 2026-10-29: Judge Timeline And BREAK Token Correction
+- User observed that Judge disappeared from the browser timeline and BREAK
+  decisions no longer appeared in the transition list. Source inspection
+  confirmed both: one append synchronously performs Silence -> Judge and then
+  awaits Judge classification, but the adapter returns only the final output;
+  `updateTimeline` used only `next_state`, skipping the returned
+  `previous_state=Judge`. Parallel VASD_BREAK telemetry was displayed in its
+  decision panel but never appended as its own transition row.
+- User requires VASD_BREAK to use constrained one-token `有/无`, where `有`
+  means interruption intent and `无` means no interruption intent. Both are
+  already verified tokenizer tokens (IDs 18830/42192). Keep request kinds and
+  prompts separate so the same surface codes have unambiguous semantics.
+- Scope before edits: map VASD_BREAK `有/无` to `<b>/</b>`, update its Prompt and
+  config descriptions/tests, insert a visible Judge timeline segment using the
+  measured semantic decision latency, and add a separate VASD_BREAK transition
+  row. Run no more than three related test entry points and restart only 8080.
+- Implemented the correction. VASD_BREAK now constrains one generation position
+  to the same verified `有/无` token pair as VASD_SEM while retaining separate
+  request kind, Prompt, threshold and `<b>/</b>` policy mapping. The timeline
+  inserts `previous_state=Judge` using actual decision latency, the state graph
+  briefly exposes Judge with a cancellable timer, and every parallel BREAK
+  result receives its own transition-log row.
+- Python/inline-JavaScript syntax and `git diff --check` pass. Three focused
+  entries passed: provider one-token mapping, page Judge/BREAK observability,
+  and WebSocket effective-break cancellation. Existing aiohttp warnings remain.
+- Rolled only the owned 8080 service: `svad22` exited normally with code 0;
+  `svad23` supervisor 438223 launched child/PGID 438352 in the same exclusive
+  run directory. MiMo 8090 and external TTS 8100 were not restarted. Health
+  returned MiMo/TTS true after normal Torch/Silero initialization.
+- Fresh real-model artifact
+  `live_svad_probe_20261029T162215Z_6d16b707` stopped immediately after the
+  first parallel classification and wrote summary/events. On the same 24 kHz
+  speech window with playback active, VASD_SEM emitted raw one-token `有`
+  (probability 0.999739, margin 8.25) and VASD_BREAK emitted raw one-token `无`
+  (probability 0.974043, margin 3.625), mapped internally to `</b>` and no
+  interruption. The returned transition is `Judge -> Listen`, PREFILL, with
+  measured Judge decision latency 452.598 ms. This is fresh proof of the masked
+  antagonist-token contract and supplies a real duration for the repaired
+  Judge timeline segment.
+- Moved the interruption-marker instruction into the base Chat Prompt and
+  removed server-side conditional concatenation. The retention switch now only
+  controls whether `partial + ⏸` is written to history; it never changes the
+  system Prompt. Focused tests prove the rule exists with retention disabled
+  and appears exactly once with retention enabled.
+- `svad23` stopped normally with exit code 0 for this code reload. First new
+  attempt `svad24` lost a narrow port-release race and failed at bind with
+  errno 98 before launching a child. A subsequent structured `/proc/net` and
+  process scan found no 8080 listener or SVAD process. Preserve the failed
+  attempt name and start a new attempt rather than reusing it.
+
+## 2026-10-30: User-Requested SVAD Checkpoint Publication
+- User requested pushing the current version before extending VASD_BREAK into
+  Listen. Parent branch is `feature/SVAD`, initially exactly synchronized with
+  `origin/feature/SVAD` at `38ee434`; both submodule worktrees/gitlinks remain
+  unchanged. Existing live `svad25` remains running and healthy on 8080.
+- Publication scope is the current semantic-admission/interruption policy,
+  one-token classifiers, interrupted-context marker/base Prompt, Judge/BREAK
+  observability, browser playback reporting, streaming TTS client/tests, live
+  no-clobber probe, Stage 4 documentation and durable plan records. Raw logs,
+  audio, caches, runtime overlays and model files remain outside Git.
+- Reviewed all four untracked files. `probe_svad_live.py`, `streaming_tts.py`
+  and `test_streaming_tts.py` are current implementation/validation sources and
+  belong in the checkpoint. `wx_tts_ref.py` is an unreferenced, non-standalone
+  historical code excerpt beginning at a decorator with missing imports/app;
+  leave it untracked rather than publish it as executable project code.
+- Scoped credential-pattern scan found no matches. `git diff --check` passed.
+  Fresh focused verification under env.sh + omni passed: four selected SVAD
+  provider/page/break/retention tests (4/4) and the independent streaming TTS
+  module (6/6). Existing aiohttp AppKey/deprecation warnings remain.
+- GitHub fetch through the existing env/github_env setup succeeded. Remote main
+  advanced independently, while `HEAD...origin/feature/SVAD` remains 0/0. The
+  first explicit `git add` failed before changing the index because the sandbox
+  exposed `.git/index.lock` as read-only. Retry the same exact path list with
+  Git write approval; this is not a conflict and no lock file was created.

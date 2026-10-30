@@ -1,12 +1,23 @@
 # 当前 MiMo Semantic VAD 实现详解
 
-更新时间：2026-10-26
+> 2026-10-28 v0.3 工作树更新：VASD 已改为 8 秒默认滑窗的 A/B 有语义/
+> 无语义分类；首个 speech chunk 即判断。VAED 保持 AVAD speech-stop 后判定。
+> VASD 滑窗只限制分类输入，`DECODE` 必须向普通 MiMo Chat 交付本轮所有已
+> 接受音频。用户无主动交互意图时由 Chat Prompt 要求模型精确输出
+> `listening`；不再使用受限 LISTENING/GENERATE 分类、阈值或 KV sidecar。
+> 2026-10-28 标签更新：VASD 的受限输出为 `需要`/`不需要`，分别映射
+> `<b>`/`</b>`；VAED 的受限输出为 `已`/`未`，分别映射 `<c>`/`</c>`。
+> 这四个字符串在当前 MiMo tokenizer 中均为单 token。
+
+更新时间：2026-10-28
 分支：`feature/SVAD`
 规范来源：`duplex_input_fsm_function_spec.md`
 主要实现：`workspace/experiments/20261025_mimo_tts_integration/semantic_vad.py`
 调试服务：`workspace/experiments/20261025_mimo_tts_integration/svad_debug_server.py`
 
-本文描述当前仓库中的 Semantic VAD 实现和当前运行服务。
+本文主体记录 v0.2 的实现和历史验收证据；文件开头的 2026-10-27 注记描述
+当前 v0.3 工作树差异。涉及 REJECT、A/B/C VASD 的正文均属于 v0.2 历史，
+不代表 v0.3 当前策略。
 它不是新的功能规格；状态机的权威规则仍然是
 `duplex_input_fsm_function_spec.md`。
 
@@ -14,18 +25,19 @@
 
 当前需要区分两类事实：
 
-1. **规范要求**：三状态 FSM、VASD Reject、VAED Complete、四类控制事件。
-2. **当前运行服务 `svad08`**：已经加载 v0.2 端点触发 VAED 逻辑。
+1. **规范要求**：三状态 FSM、A/B VASD、VAED Complete、四类控制事件。
+2. **当前运行服务 `svad20`**：加载 v0.3 VASD 滑窗、完整 `decode_audio`
+   Chat 交付和外部 CosyVoice 流式 TTS；v0.2 记录仅作为历史证据。
 
-当前运行服务：
+当前运行服务快照（2026-10-29）：
 
 | 服务 | PID | 监听 | 资源 | 状态 |
 |---|---:|---|---|---|
 | MiMo | 42095 | `127.0.0.1:8090` | GPU 0-3 | 运行中 |
-| SVAD UI `svad12` | 146753 | `28.29.217.180:8080` | CPU | 运行中 |
-| Qwen3-TTS | - | 8093 无监听 | GPU 4-7 未用于本任务 | 未启动 |
+| SVAD UI `svad20` | 403729 | `28.29.217.180:8080` | CPU | 运行中 |
+| External CosyVoice3 | 外部服务 | `29.213.195.135:8100` | 服务外部管理 | 运行中 |
 
-`svad12` 已经包含：
+当前 `svad20` 服务包含：
 
 - Silero AVAD。
 - MiMo VASD / VAED。
@@ -34,6 +46,8 @@
 - Silence 区间日志。
 - FSM 图与持久时间轴。
 - MiMo 文本 Chat。
+- MiMo 增量文本块、单任务连续 `text_idx` submit、并发 CosyVoice poll 和
+  浏览器 PCM 播放。策略为 `EagerTTSStrategy`，不是等待完整回复后再合成。
 - 三个可编辑中文 Prompt。
 - VAED 只在 AVAD `speech_stopped` 下降沿运行。
 - `</c>` 后跨静音保持 Listen，恢复说话后继续同一轮。
@@ -669,7 +683,8 @@ reply = 三加四等于七。
 3. v0.2 已通过 35 项核心/WebSocket 回归，但真实北京长句仍需浏览器验收。
 4. 当前没有训练后的真实 `<b>/<c>` 单 Token；A/B/C 只是内部分类码。
 5. 当前没有 Speak Head；DECODE 后默认启动 Chat。
-6. 当前只输出文字，TTS 未接入此验收服务。
+6. 当前已接入外部 CosyVoice3 TTS；Audio Engine 无 cancel 端点，因此本地
+   BREAK 只能停止 poll 与浏览器播放，已提交的上游任务可能继续执行。
 7. 页面历史只存在于当前浏览器 WebSocket 会话。
 8. 尚未完成多语言、回声、多人背景音和长会话统计验收。
 
@@ -681,4 +696,5 @@ reply = 三加四等于七。
    `complete_confirmations`。
 4. 验证 8 秒未完成静音兜底是否符合实际交互节奏。
 5. 验证真实浏览器中新 BREAK 对长 Chat 回复的取消。
-6. 在确定 VAED 策略后再接入 TTS 和播放 ACK。
+6. 浏览器实测真实麦克风下的 TTS 可听首包、回声和 BREAK 后即时静音；当前
+   服务端与协议回放已通过，但浏览器端没有播放 ACK 账本。

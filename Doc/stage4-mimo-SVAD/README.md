@@ -5,9 +5,29 @@ This stage adds the specified acoustic + semantic input controller on branch
 `duplex_input_fsm_function_spec.md`; this document describes the repository
 integration and its current acceptance boundary.
 
+## v0.3 Worktree Update
+
+The current worktree changes VASD to a duration-bounded A/B classifier:
+
+- `vasd_window_ms` defaults to 8000ms.
+- The first speech chunk is classified immediately.
+- Before the window fills, VASD sees the available prefix; after it fills,
+  complete browser chunks slide out from the left.
+- VASD allows only `A -> <b>` (semantic content) and `B -> </b>` (no semantic
+  content). The previous C/REJECT class is removed from VASD.
+- Sliding applies only to classification. Candidate/turn audio retained for
+  inference remains complete.
+
+After VAED completes, the debug service passes the complete accepted user turn
+directly to normal MiMo Chat. There is no additional LISTENING/GENERATE
+classifier, threshold, response Prompt or KV sidecar gate. The Chat Prompt may
+instruct the model to output exactly `listening` when it finds no active user
+interaction intent. This is text-generation policy, not another FSM state.
+
 Detailed current-state documentation:
 [`current_vad_implementation_20261026.md`](current_vad_implementation_20261026.md).
-It describes the normative FSM and the currently running `svad12` v0.2 behavior.
+It distinguishes historical v0.2 evidence from the current v0.3 acceptance
+service.
 
 ## Implemented Components
 
@@ -16,8 +36,10 @@ It describes the normative FSM and the currently running `svad12` v0.2 behavior.
   `speech_stopped` edge while in Listen.
 - `MiMoSemanticVADProvider`: sends candidate audio to the existing MiMo
   `/v1/chat/completions` audio interface and parses:
-  - VASD: `<b>`, `</b>`, or internal `REJECT`.
+  - VASD: `<b>` or `</b>`.
   - VAED: `<c>` or `</c>`.
+- `MiMoChatProvider`: receives the complete `decode_audio` sequence for the
+  accepted turn and streams the normal Chat response.
 - `SemanticRealtimeAdapter`: runs Silero AVAD, buffers candidate audio, and
   maps FSM events onto the existing realtime runner.
 - Speak-decision boundary: `choose_decode_token` implements
@@ -113,7 +135,9 @@ microphone acceptance and long-session resource use remain open gates.
 ## Live Acceptance Console
 
 The current uncommitted acceptance slice adds a standalone console that runs
-AVAD, MiMo VASD/VAED, the input FSM and MiMo text Chat. It does not start TTS.
+AVAD, MiMo VASD/VAED, the input FSM, MiMo text Chat and external CosyVoice3
+streaming TTS. TTS is reached over the user-provided Audio Engine HTTP service;
+no local TTS GPU process is started by this repository.
 
 Current origin: `http://28.29.217.180:8080/`.
 
@@ -124,18 +148,18 @@ The transition log also shows MiMo's exact generated `message.content`, the
 normalized command and whether strict command validation passed.
 
 The normative labels are not single tokenizer tokens in this checkpoint:
-`<b>` uses two tokens, `</b>` three, `<c>` two, `</c>` three, and `REJECT`
-two. The runtime therefore uses constrained internal single-token class codes
-without modifying the tokenizer or checkpoint:
+`<b>` uses two tokens, `</b>` three, `<c>` two and `</c>` three. The runtime
+therefore uses constrained Chinese single-token class codes without modifying
+the tokenizer or checkpoint:
 
-- VASD: `A -> <b>`, `B -> </b>`, `C -> REJECT`.
-- VAED: `A -> <c>`, `B -> </c>`.
+- VASD: `需要` (ID 85106) -> `<b>`, `不需要` (ID 104689) -> `</b>`.
+- VAED: `已` (ID 36667) -> `<c>`, `未` (ID 38342) -> `</c>`.
 
-Each request sets `allowed_token_ids`, `logprob_token_ids`, `logprobs=true` and
-`max_tokens=1`. The sampled code must equal the candidate-logprob argmax. The
-page and logs expose the canonical-label logprobs, normalized confidence and
-top-two logprob margin. External FSM events continue to use the six normative
-tokens rather than the internal A/B/C codes.
+Each semantic-classifier request sets `allowed_token_ids`, `logprob_token_ids`,
+`logprobs=true` and `max_tokens=1`. The sampled code must equal the
+candidate-logprob argmax. The page and logs expose the canonical-label
+logprobs, normalized confidence and top-two logprob margin. External FSM events
+continue to use the six normative tokens rather than the internal Chinese codes.
 
 Continuous `Silence -> Silence` audio blocks are not written as separate INFO
 transitions. They are accumulated and emitted once as a
@@ -152,13 +176,15 @@ Chrome profile:
   --new-window http://28.29.217.180:8080/
 ```
 
-Live services currently use separate retained run directories:
+Live services currently use separate retained run directories. Snapshot taken
+on 2026-10-29 after MiMo-to-TTS integration:
 
 - MiMo PID 42095, supervisor 42091, GPU 0-3, loopback 8090.
-- SVAD UI `svad12` PID 146753, supervisor 146752, CPU,
+- SVAD UI `svad18` PID 384648, supervisor 384641, CPU,
   `28.29.217.180:8080`, run directory
-  `workspace/logs/20261027T035800Z_mimo_svad_chunk_config/`.
-- TTS remains stopped; GPU 4-7 are unused.
+  `workspace/logs/20261029T100508Z_mimo_single_phase2_5183e37a/`.
+- External CosyVoice3 Audio Engine: `29.213.195.135:8100`, 24kHz PCM,
+  default registered voice `bench_spk`. No local TTS GPU process is running.
 
 Fresh real-model checks before user acceptance:
 
@@ -176,12 +202,16 @@ No acceptance-console change has been committed or pushed.
 
 ## FSM-Driven Text Conversation
 
-The current uncommitted `svad12` acceptance service connects FSM DECODE
-to MiMo text generation. TTS remains stopped.
+The current uncommitted `svad18` acceptance service connects FSM DECODE
+to MiMo text generation and ordered external TTS rendering.
 
 - A DECODE carries the complete accepted turn audio to MiMo Chat.
 - Chat output streams into the right-side conversation panel.
+- MiMo deltas are grouped into bounded low-latency text chunks. One response
+  reuses one CosyVoice task ID; chunks are appended with consecutive `text_idx`
+  under `EagerTTSStrategy`, while `/poll` streams PCM concurrently.
 - A new effective BREAK cancels an active Chat HTTP stream.
+- A new effective BREAK also stops TTS polling and all queued browser audio.
 - Up to four completed audio/text turns are retained as bounded history.
 - VAED runs only on AVAD speech-stop edges using the complete accumulated turn.
 - `</c>` keeps Listen across silence; resumed speech continues the same turn
@@ -192,7 +222,8 @@ to MiMo text generation. TTS remains stopped.
 The browser has one all-in-one settings panel for the target audio chunk
 interval, all AVAD parameters, VASD
 BREAK and VAED COMPLETE probability/margin/confirmation gates, buffer/timeout
-values and the Chinese VASD, VAED and Chat prompts. `Apply all settings`
+values, TTS enable/reg-ID/speed/target-RMS and the Chinese VASD, VAED and Chat
+prompts. TTS min/max text-chunk lengths are also configurable. `Apply all settings`
 rebuilds the current WebSocket adapter and updates all three prompts without
 changing model files or global service state.
 The defaults are stored in
@@ -206,3 +237,30 @@ The Chat user audio is followed by an explicit Chinese instruction to answer
 the user's question rather than transcribe or repeat the audio. Fresh real
 probe `chat_probe_20261026T154033Z` produced one Chat turn, zero cancellations,
 and the answer `三加四等于七。` for the preserved `三加四等于几` fixture.
+
+Final live TTS replay on 2026-10-29 used the same preserved speech fixture and
+the final `svad18` service. MiMo again returned `三加四等于七。`; CosyVoice
+returned one segment with 71760 bytes of 24kHz PCM, RMS0.08474, and no errors.
+The WAV, typed events and summary are retained under
+`workspace/logs/20261029T100508Z_mimo_single_phase2_5183e37a/`
+`mimo_tts_probe_20261029T100753Z/`.
+
+After the user required true streaming rather than sentence-level tasks, the
+path was changed to one TTS task per MiMo response. A controlled
+long reply generated eight non-final text chunks plus one empty final chunk,
+all under one task ID with indices0..8. First PCM arrived at1.425s and MiMo
+`chat.done` at1.997s, so audible data became available about571ms before text
+completion. The run produced643920 bytes of24kHz PCM at RMS0.09398 with no
+errors. Evidence is retained in
+`workspace/logs/20261029T105022Z_mimo_single_phase2_1c8df76f/`
+`incremental_tts_probe_20261029T105801Z/`.
+
+The final loaded service is `svad20`, supervisor PID403725/UI PID403729, in
+`workspace/logs/20261029T110613Z_mimo_single_phase2_bf96b206/`. Its repeated
+live proof again used one task and indices0..8; first PCM arrived at1.280s,
+`chat.done` at1.571s, and no errors occurred. Evidence is in
+`incremental_tts_probe_20261029T111056Z/`.
+
+The deployed Audio Engine has no cancel endpoint. Cancellation immediately
+stops local poll consumption and browser playback, but an already submitted
+upstream synthesis task may continue to completion on that service.

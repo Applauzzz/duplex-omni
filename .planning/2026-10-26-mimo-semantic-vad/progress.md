@@ -215,6 +215,136 @@
 - User explicitly authorized committing and pushing the current `feature/SVAD`
   snapshot. Publication no longer waits on the still-open Beijing browser
   acceptance; that acceptance remains documented as an open quality gate.
+- New v0.3 direction: VASD uses a configurable x-second sliding window and
+  becomes binary semantic/no-semantic (`<b>`/`</b>`); VAED remains acoustic-
+  endpoint triggered. Inference must retain all SVAD-accepted audio from a
+  user turn and deliver that complete context to Chat at DECODE.
+- Backend audit found the current MiMo realtime plugin is not capable of the
+  requested model-side behavior: it advertises turn-commit-only and raises
+  `MiMo inference requires a committed turn` on non-final append. Existing
+  append commands only buffer audio. Native resumable Stage0 examples exist in
+  other model plugins, so real MiMo KV reuse requires a new backend contract.
+- Implemented v0.3 strategy layer in the worktree. VASD is now masked A/B only,
+  runs on t0 immediately, and uses a duration-aware `vasd_window_ms` suffix.
+  A 500ms/8s test proves `[t0..t15] -> [t1..t16]` while full candidate audio
+  still retains all17 chunks. VAED endpoint behavior is unchanged.
+- An experimental masked A/B Response decision (`LISTENING`/`GENERATE`),
+  thresholds, sidecar server and fourth Prompt were added briefly but were not
+  accepted. They were removed on 2026-10-28. The accepted v0.3 contract is
+  normal full-context Chat: `DECODE` passes the complete `decode_audio` to
+  MiMo Chat, and the Chinese Chat Prompt asks for literal `listening` when
+  there is no active interaction intent. Native MiMo request/KV reuse remains
+  deferred backend work and is not claimed by the service.
+- Completed v0.3 cleanup on 2026-10-28. Removed the uncommitted streaming
+  sidecar, its launcher role, classifier tests, fourth Prompt, response
+  thresholds, WebSocket `response.decision` events and UI controls. The debug
+  service now has a single DECODE path: `output.decode_audio` is passed
+  directly and unchanged to `MiMoChatProvider.stream_reply`.
+- Strengthened the WebSocket regression: three distinct accepted audio chunks
+  must arrive at Chat in exact input order, including the adapter's normalized
+  append metadata. This proves the Chat path uses the complete accepted turn,
+  not the VASD suffix window or only the final chunk.
+- Outside-sandbox validation on 2026-10-28 used `env.sh`, `conda activate
+  omni`, and repository-local `vllm-omni`/`vllm-src` import roots:
+  `python -B -m unittest test_semantic_vad test_svad_debug -q` passed 43/43.
+  JSON parsing, Python compile, frontend JavaScript parsing with the pinned
+  Node binary, stale-response-control scan and `git diff --check` also passed.
+- First `svad13` launch exposed a launcher assumption: `run_service.py` raised
+  `KeyError: CUDA_VISIBLE_DEVICES` after spawning the CPU UI child, so the
+  child was stopped. The launcher now records an empty value when the variable
+  is absent. A new retained `svad14` run started in
+  `workspace/logs/20261028T042103Z_mimo_single_phase2_8d3aafea/` with
+  supervisor PID282603 and UI PID282608. MiMo PID42095 on loopback8090 was not
+  restarted. After Silero initialized, `/health` returned `mimo=true` at1.8ms;
+  `/defaults` exposed only VASD/VAED/Chat prompts and the served page had no
+  response-classifier controls.
+- Updated the two semantic prompts on 2026-10-28 using the supplied boundary
+  policy. VASD now constrains MiMo to `需要 -> <b>` or `不需要 -> </b>`; VAED
+  constrains it to `已 -> <c>` or `未 -> </c>`. Direct local `tokenizer.json`
+  verification found IDs `需要=85106`、`不需要=104689`、`已=36667`、`未=38342`,
+  all one token without a leading space. A live HTTP probe accepted both masks:
+  VASD returned `需要`; VAED returned `未`; each response included both
+  requested candidate logprobs. The classifier parser now rejects surrounding
+  whitespace as well as explanations, preserving exact-label observability.
+- Restarted only the CPU UI as `svad15` in
+  `workspace/logs/20261028T044418Z_mimo_single_phase2_3b2e9797/` after the
+  label change; supervisor PID289405 and UI PID289410. MiMo PID42095 was
+  preserved. `/health` returned `mimo=true` at1.7ms, and `/defaults` confirmed
+  the three Prompt keys plus exact `需要/不需要` and `已/未` output instructions.
+- After aligning invalid-command diagnostics with the Chinese labels, restarted
+  only the CPU UI as `svad16` in
+  `workspace/logs/20261028T053651Z_mimo_single_phase2_1babea77/`; supervisor
+  PID303530 and UI PID303536. MiMo PID42095 remained unchanged. `/health`
+  returned `mimo=true` at2.0ms and `/defaults` verified the final prompts.
+- Started Phase 8 on 2026-10-29 to render MiMo Chat text through the user-
+  supplied `wx_tts_ref.py` protocol. Initial live POST to
+  `29.213.195.135:8100/api/tts/stream` returned HTTP404. OpenAPI inspection
+  established that this address is the underlying CosyVoice3 Audio Engine,
+  not the wrapper: the real contract is `/submit` plus repeated `/poll`.
+- Added `streaming_tts.py` with strict submit/poll validation, bounded text and
+  audio duration, fixed sample-rate checks, PCM16 alignment, task/trace IDs,
+  speed/target-RMS validation and configurable `reg_id`. `/selftest` documents
+  `bench_spk` as pre-registered; direct live submit/poll succeeded at24kHz,
+  first PCM around191ms and108960 bytes total. The final provider probe
+  produced141360 bytes, first PCM around222ms and RMS0.0981.
+- Reused `backend.SpannedSplitter` so MiMo text remains visible as deltas while
+  complete sentence-level spans enter a bounded ordered TTS queue. Added typed
+  `tts.segment`, `tts.audio`, `tts.segment_done`, `tts.done`, `tts.error` and
+  `tts.cancelled` WebSocket events. Exact Chat output `listening` produces no
+  speech. TTS failure leaves `chat.done` text intact.
+- Added browser PCM16 scheduling with the actual event sample rate and a
+  separate playback `AudioContext`. New BREAK, reset, settings rebuild and Stop
+  invalidate queued playback. Cancellation distinguishes active text generation
+  (`chat.cancelled`) from text-complete/TTS-active playback (`tts.cancelled`).
+- Added local TTS settings `tts_enabled`, `tts_reg_id`, `tts_speed` and
+  `tts_target_rms`; defaults use the live-verified `bench_spk`. `/health` now
+  checks both MiMo and CosyVoice. The Audio Engine exposes no task-cancel route,
+  so cancellation stops local polling/playback but an upstream submitted task
+  may finish server-side.
+- Final focused suite on 2026-10-29 passed50/50 across semantic VAD, debug
+  WebSocket and submit/poll TTS contracts. JSON parsing, Python compile,
+  frontend JavaScript parse/marker checks and `git diff --check` passed.
+- Final live service is `svad18`, supervisor PID384641/UI PID384648, in
+  `workspace/logs/20261029T100508Z_mimo_single_phase2_5183e37a/`; MiMo
+  PID42095 was not restarted. `/health` returned `mimo=true`, `tts=true`.
+  Real saved speech replay used a session-local active-query VASD Prompt solely
+  to enter Chat without changing the default interruption policy. It produced
+  `PREFILL`, six `CHUNK_PREFILL`, `DECODE`, MiMo text `三加四等于七。`, one TTS
+  segment,71760 bytes of24kHz PCM with RMS0.08474 and no errors. Artifacts:
+  `mimo_tts_probe_20261029T100753Z/` under the `svad18` run.
+- User clarified that sentence-level independent TTS tasks were insufficient;
+  true streaming must append text to one TTS task before MiMo finishes. Live
+  protocol probes confirmed repeated submit calls with one `task_id` and
+  increasing `text_idx` are supported. `SmartSplit` still withheld PCM until
+  the final text chunk. `EagerTTSStrategy` emitted first PCM at0.202s while the
+  final text submit occurred at5.032s. The service also accepts an empty final
+  chunk, allowing clean completion without repeating text.
+- Reworked `streaming_tts.py` into a response-scoped incremental session. One
+  MiMo response now owns one TTS task; a bounded `IncrementalTextChunker`
+  submits punctuation or max-length chunks with consecutive indices and a
+  final empty chunk. Submit and poll workers run concurrently and are isolated
+  from MiMo generation failures. Local settings expose `tts_min_chars` default8
+  and `tts_max_chars` default48. The TTS strategy is fixed to the live-verified
+  `EagerTTSStrategy`.
+- Added `tts.text` observability with task ID, text index and final flag. A
+  controlled slow-Chat test proves `tts.audio` precedes `chat.done`; the full
+  Stage3+Stage4 suite now passes64/64. Exact `listening` cancels the unused TTS
+  session and clears playback ownership without submitting text.
+- Restarted the final incremental service as `svad19`, supervisor PID398843/UI
+  PID398850, in
+  `workspace/logs/20261029T105022Z_mimo_single_phase2_1c8df76f/`; MiMo
+  PID42095 was preserved. A real long-reply replay submitted eight non-final
+  text chunks plus one empty final chunk under one task ID with consecutive
+  indices0..8. First PCM arrived at1.425s, `chat.done` at1.997s, so speech led
+  completion by0.571s. It produced643920 bytes of24kHz PCM, RMS0.09398, with
+  no errors. Artifacts: `incremental_tts_probe_20261029T105801Z/`.
+- Loaded the final listening/playback ownership fix as `svad20`, supervisor
+  PID403725/UI PID403729, in
+  `workspace/logs/20261029T110613Z_mimo_single_phase2_bf96b206/`. MiMo
+  PID42095 remained unchanged. Final replay again used one task ID and indices
+  0..8; first PCM arrived at1.280s, `chat.done` at1.571s, a0.291s lead. It
+  produced636240 bytes of24kHz PCM at RMS0.09220 with no errors. Evidence:
+  `incremental_tts_probe_20261029T111056Z/`.
 
 ### Test Results
 | Test | Expected | Actual | Status |

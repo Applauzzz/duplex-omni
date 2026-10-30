@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 from collections.abc import Mapping, Sequence
@@ -27,6 +28,12 @@ BREAK_TOKEN = "<b>"
 NO_BREAK_TOKEN = "</b>"
 COMPLETE_TOKEN = "<c>"
 INCOMPLETE_TOKEN = "</c>"
+INTERRUPTION_MARKER = "⏸"
+INTERRUPTION_MARKER_TOKEN_ID = 149660
+INTERRUPTED_CONTEXT_INSTRUCTION = f"""对话历史中的符号 {INTERRUPTION_MARKER} 是单 token 的回复中断标记。
+它表示该条 assistant 回复在此位置被用户打断，并未继续完成。
+下一轮中，如果用户没有主动问起被打断前的内容，不得从该标记前的未完成回复继续生成，必须转向用户当前的新问题或新需求。
+如果用户主动追问被打断前的内容，可以结合标记前已经生成的内容回答，并明确提醒用户该回复当时在标记处被打断。"""
 SEMANTIC_TOKENS = frozenset({
     SPEECH_TOKEN,
     NO_SPEECH_TOKEN,
@@ -51,6 +58,8 @@ class InputEvent(str, Enum):
 
 
 class SemanticLabel(str, Enum):
+    SEMANTIC = "SEMANTIC"
+    NO_SEMANTIC = "NO_SEMANTIC"
     BREAK = "BREAK"
     NO_BREAK = "NO_BREAK"
     REJECT = "REJECT"
@@ -83,6 +92,21 @@ class VASDDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class VASDSemDecision:
+    semantic: bool
+    raw_output: str | None = field(default=None, compare=False)
+    command: str | None = field(default=None, compare=False)
+    valid: bool = field(default=True, compare=False)
+    logprobs: dict[str, float] = field(default_factory=dict, compare=False)
+    probability: float | None = field(default=None, compare=False)
+    margin: float | None = field(default=None, compare=False)
+
+    @property
+    def label(self) -> SemanticLabel:
+        return SemanticLabel.SEMANTIC if self.semantic else SemanticLabel.NO_SEMANTIC
+
+
+@dataclass(frozen=True, slots=True)
 class VAEDDecision:
     complete: bool
     raw_output: str | None = field(default=None, compare=False)
@@ -101,7 +125,10 @@ class VAEDDecision:
 class FSMInput:
     audio_chunk: object | None
     speech: bool
+    semantic_decision: bool | None = None
     break_decision: bool | None = None
+    interrupt_decision: bool | None = None
+    playback_active: bool = False
     reject: bool | None = None
     complete: bool | None = None
     model_output: str | None = None
@@ -111,6 +138,8 @@ class FSMInput:
     semantic_logprobs: dict[str, float] | None = None
     semantic_probability: float | None = None
     semantic_margin: float | None = None
+    semantic_accepted: bool | None = None
+    semantic_confirmation_count: int | None = None
     break_accepted: bool | None = None
     break_confirmation_count: int | None = None
     completion_accepted: bool | None = None
@@ -118,6 +147,7 @@ class FSMInput:
     semantic_endpoint_evaluated: bool = False
     force_decode: bool = False
     decode_reason: str | None = None
+    parallel_decisions: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +160,10 @@ class FSMOutput:
     decode_audio: tuple[object, ...] | None
     semantic_label: SemanticLabel
     speech: bool
+    semantic_decision: bool | None
     break_decision: bool | None
+    interrupt_decision: bool | None
+    playback_active: bool
     reject: bool | None
     complete: bool | None
     timestamp: float
@@ -142,19 +175,25 @@ class FSMOutput:
     semantic_logprobs: dict[str, float] | None = None
     semantic_probability: float | None = None
     semantic_margin: float | None = None
+    semantic_accepted: bool | None = None
+    semantic_confirmation_count: int | None = None
     break_accepted: bool | None = None
     break_confirmation_count: int | None = None
     completion_accepted: bool | None = None
     completion_confirmation_count: int | None = None
     semantic_endpoint_evaluated: bool = False
     decode_reason: str | None = None
+    parallel_decisions: dict[str, object] | None = None
 
     def as_log(self) -> dict[str, object]:
         return {
             "timestamp": self.timestamp,
             "previous_state": self.previous_state.value,
             "speech": self.speech,
+            "semantic_decision": self.semantic_decision,
             "break_decision": self.break_decision,
+            "interrupt_decision": self.interrupt_decision,
+            "playback_active": self.playback_active,
             "reject": self.reject,
             "complete": self.complete,
             "semantic_label": self.semantic_label.value,
@@ -171,16 +210,22 @@ class FSMOutput:
             "semantic_logprobs": self.semantic_logprobs,
             "semantic_probability": self.semantic_probability,
             "semantic_margin": self.semantic_margin,
+            "semantic_accepted": self.semantic_accepted,
+            "semantic_confirmation_count": self.semantic_confirmation_count,
             "break_accepted": self.break_accepted,
             "break_confirmation_count": self.break_confirmation_count,
             "completion_accepted": self.completion_accepted,
             "completion_confirmation_count": self.completion_confirmation_count,
             "semantic_endpoint_evaluated": self.semantic_endpoint_evaluated,
             "decode_reason": self.decode_reason,
+            "parallel_decisions": self.parallel_decisions,
         }
 
 
 class SemanticVADProvider(Protocol):
+    async def decide_sem(self, audio_chunks: Sequence[object], *, context: Mapping[str, object]) -> VASDSemDecision:
+        ...
+
     async def decide_break(self, audio_chunks: Sequence[object], *, context: Mapping[str, object]) -> VASDDecision:
         ...
 
@@ -297,16 +342,31 @@ class DuplexInputFSM:
                 self.state = InputState.JUDGE
 
         elif previous == InputState.JUDGE:
-            if item.break_decision is None or item.reject is None:
-                raise ValueError("Judge requires break_decision and reject")
+            legacy_break_input = item.semantic_decision is None
+            semantic_decision = (
+                item.semantic_decision
+                if item.semantic_decision is not None
+                else item.break_decision
+            )
+            if semantic_decision is None:
+                raise ValueError("Judge requires semantic_decision")
             self._append(self._candidate_audio, item.audio_chunk)
-            decision = VASDDecision(item.break_decision, item.reject)
-            semantic_label = decision.label
-            effective_break = decision.break_decision and not decision.reject
-            if effective_break:
+            semantic_label = (
+                VASDDecision(bool(item.break_decision), bool(item.reject)).label
+                if legacy_break_input
+                else (
+                    SemanticLabel.SEMANTIC if semantic_decision
+                    else SemanticLabel.NO_SEMANTIC
+                )
+            )
+            if semantic_decision:
                 self.state = InputState.LISTEN
                 event = InputEvent.PREFILL
-                interrupt = True
+                interrupt = (
+                    bool(item.break_decision and not item.reject)
+                    if legacy_break_input
+                    else bool(item.playback_active and item.interrupt_decision)
+                )
                 prefill_audio = tuple(self._candidate_audio)
                 self._turn_audio = list(self._candidate_audio)
                 self._candidate_audio.clear()
@@ -351,7 +411,10 @@ class DuplexInputFSM:
             decode_audio=decode_audio,
             semantic_label=semantic_label,
             speech=bool(item.speech),
+            semantic_decision=item.semantic_decision,
             break_decision=item.break_decision,
+            interrupt_decision=item.interrupt_decision,
+            playback_active=item.playback_active,
             reject=item.reject,
             complete=item.complete,
             timestamp=time.time(),
@@ -362,12 +425,15 @@ class DuplexInputFSM:
             semantic_logprobs=item.semantic_logprobs,
             semantic_probability=item.semantic_probability,
             semantic_margin=item.semantic_margin,
+            semantic_accepted=item.semantic_accepted,
+            semantic_confirmation_count=item.semantic_confirmation_count,
             break_accepted=item.break_accepted,
             break_confirmation_count=item.break_confirmation_count,
             completion_accepted=item.completion_accepted,
             completion_confirmation_count=item.completion_confirmation_count,
             semantic_endpoint_evaluated=item.semantic_endpoint_evaluated,
             decode_reason=item.decode_reason,
+            parallel_decisions=item.parallel_decisions,
         )
         return output
 
@@ -380,6 +446,10 @@ class SemanticVADController:
         provider: SemanticVADProvider,
         *,
         max_buffered_chunks: int = 512,
+        vasd_window_ms: int = 8000,
+        sem_probability_threshold: float = 0.8,
+        sem_margin_threshold: float = 1.5,
+        sem_confirmations: int = 1,
         break_probability_threshold: float = 0.8,
         break_margin_threshold: float = 1.5,
         break_confirmations: int = 1,
@@ -389,17 +459,154 @@ class SemanticVADController:
     ) -> None:
         self.provider = provider
         self.fsm = DuplexInputFSM(max_buffered_chunks=max_buffered_chunks)
+        self.vasd_window_ms = vasd_window_ms
+        self.sem_probability_threshold = sem_probability_threshold
+        self.sem_margin_threshold = sem_margin_threshold
+        self.sem_confirmations = sem_confirmations
         self.break_probability_threshold = break_probability_threshold
         self.break_margin_threshold = break_margin_threshold
         self.break_confirmations = break_confirmations
         self.complete_probability_threshold = complete_probability_threshold
         self.complete_margin_threshold = complete_margin_threshold
         self.complete_confirmations = complete_confirmations
+        self._sem_confirmation_count = 0
         self._break_confirmation_count = 0
         self._complete_confirmation_count = 0
 
+    @staticmethod
+    def _qualifies(decision, probability_threshold: float, margin_threshold: float) -> bool:
+        return bool(
+            getattr(decision, "semantic", getattr(decision, "break_decision", False))
+            and (
+                (decision.probability is None and decision.margin is None)
+                or (
+                    decision.probability is not None
+                    and decision.margin is not None
+                    and decision.probability >= probability_threshold
+                    and decision.margin >= margin_threshold
+                )
+            )
+        )
+
+    def _vasd_audio(self, audio_chunk: object) -> tuple[object, ...]:
+        chunks = self.fsm.semantic_audio_with(audio_chunk)
+        if self.vasd_window_ms <= 0 or not chunks:
+            return chunks
+        selected: list[object] = []
+        duration_ms = 0.0
+        for chunk in reversed(chunks):
+            chunk_ms = _chunk_duration_ms(chunk) if isinstance(chunk, Mapping) else 0.0
+            if chunk_ms <= 0:
+                return chunks
+            if selected and duration_ms + chunk_ms > self.vasd_window_ms:
+                break
+            selected.append(chunk)
+            duration_ms += chunk_ms
+            if duration_ms >= self.vasd_window_ms:
+                break
+        return tuple(reversed(selected))
+
+    async def _process_judge(
+        self,
+        audio_chunk: object,
+        *,
+        speech: bool,
+        semantic_context: Mapping[str, object],
+    ) -> FSMOutput:
+        self._complete_confirmation_count = 0
+        started = time.monotonic()
+        audio = self._vasd_audio(audio_chunk)
+        playback_active = bool(semantic_context.get("tts_playback_active", False))
+        decide_sem = getattr(self.provider, "decide_sem", None)
+        if decide_sem is None:
+            async def decide_sem(audio_chunks, *, context):
+                legacy = await self.provider.decide_break(audio_chunks, context=context)
+                return VASDSemDecision(
+                    legacy.break_decision and not legacy.reject,
+                    legacy.raw_output, legacy.command, legacy.valid,
+                    legacy.logprobs, legacy.probability, legacy.margin,
+                )
+        sem_task = asyncio.create_task(decide_sem(audio, context=semantic_context))
+        break_task = (
+            asyncio.create_task(self.provider.decide_break(audio, context=semantic_context))
+            if playback_active else None
+        )
+        sem_decision = await sem_task
+        break_decision = await break_task if break_task is not None else None
+
+        sem_qualifies = self._qualifies(
+            sem_decision, self.sem_probability_threshold, self.sem_margin_threshold)
+        self._sem_confirmation_count = self._sem_confirmation_count + 1 if sem_qualifies else 0
+        sem_accepted = sem_qualifies and self._sem_confirmation_count >= self.sem_confirmations
+
+        break_qualifies = bool(
+            break_decision is not None
+            and self._qualifies(
+                break_decision,
+                self.break_probability_threshold,
+                self.break_margin_threshold,
+            )
+        )
+        self._break_confirmation_count = self._break_confirmation_count + 1 if break_qualifies else 0
+        break_accepted = bool(
+            break_qualifies
+            and self._break_confirmation_count >= self.break_confirmations
+        )
+        parallel_decisions = {
+            "VASD_SEM": {
+                "raw_output": sem_decision.raw_output,
+                "command": sem_decision.command,
+                "label": sem_decision.label.value,
+                "logprobs": sem_decision.logprobs,
+                "probability": sem_decision.probability,
+                "margin": sem_decision.margin,
+                "accepted": sem_accepted,
+                "confirmation_count": self._sem_confirmation_count,
+            },
+            "VASD_BREAK": None if break_decision is None else {
+                "raw_output": break_decision.raw_output,
+                "command": break_decision.command,
+                "label": break_decision.label.value,
+                "logprobs": break_decision.logprobs,
+                "probability": break_decision.probability,
+                "margin": break_decision.margin,
+                "accepted": break_accepted,
+                "confirmation_count": self._break_confirmation_count,
+            },
+        }
+        output = replace(self.fsm.step(FSMInput(
+            audio_chunk=audio_chunk,
+            speech=speech,
+            semantic_decision=sem_accepted,
+            break_decision=(break_decision.break_decision if break_decision is not None else None),
+            interrupt_decision=break_accepted,
+            playback_active=playback_active,
+            reject=False,
+            model_output=sem_decision.raw_output,
+            semantic_command=sem_decision.command,
+            semantic_valid=sem_decision.valid,
+            request_kind="VASD_SEM",
+            semantic_logprobs=sem_decision.logprobs,
+            semantic_probability=sem_decision.probability,
+            semantic_margin=sem_decision.margin,
+            semantic_accepted=sem_accepted,
+            semantic_confirmation_count=self._sem_confirmation_count,
+            break_accepted=break_accepted,
+            break_confirmation_count=self._break_confirmation_count,
+            parallel_decisions=parallel_decisions,
+        )), semantic_label=sem_decision.label,
+            decision_latency_ms=(time.monotonic() - started) * 1000)
+        if sem_accepted or output.state != InputState.JUDGE:
+            self._sem_confirmation_count = 0
+            self._break_confirmation_count = 0
+        elif not playback_active:
+            self._break_confirmation_count = 0
+        self.fsm.record(output, context=semantic_context)
+        return output
+
     def reset(self) -> None:
         self.fsm.reset()
+        self._sem_confirmation_count = 0
         self._break_confirmation_count = 0
         self._complete_confirmation_count = 0
 
@@ -415,47 +622,8 @@ class SemanticVADController:
     ) -> FSMOutput:
         semantic_context = context or {}
         if self.fsm.state == InputState.JUDGE:
-            self._complete_confirmation_count = 0
-            started = time.monotonic()
-            decision = await self.provider.decide_break(
-                self.fsm.semantic_audio_with(audio_chunk),
-                context=semantic_context,
-            )
-            qualifies = bool(
-                decision.break_decision
-                and not decision.reject
-                and (
-                    (decision.probability is None and decision.margin is None)
-                    or (
-                        decision.probability is not None
-                        and decision.margin is not None
-                        and decision.probability >= self.break_probability_threshold
-                        and decision.margin >= self.break_margin_threshold
-                    )
-                )
-            )
-            self._break_confirmation_count = self._break_confirmation_count + 1 if qualifies else 0
-            accepted = qualifies and self._break_confirmation_count >= self.break_confirmations
-            output = replace(self.fsm.step(FSMInput(
-                audio_chunk=audio_chunk,
-                speech=speech,
-                break_decision=accepted,
-                reject=decision.reject,
-                model_output=decision.raw_output,
-                semantic_command=decision.command,
-                semantic_valid=decision.valid,
-                request_kind="VASD",
-                semantic_logprobs=decision.logprobs,
-                semantic_probability=decision.probability,
-                semantic_margin=decision.margin,
-                break_accepted=accepted,
-                break_confirmation_count=self._break_confirmation_count,
-            )), semantic_label=decision.label,
-                decision_latency_ms=(time.monotonic() - started) * 1000)
-            if accepted or output.state != InputState.JUDGE:
-                self._break_confirmation_count = 0
-            self.fsm.record(output, context=semantic_context)
-            return output
+            return await self._process_judge(
+                audio_chunk, speech=speech, semantic_context=semantic_context)
         if self.fsm.state == InputState.LISTEN:
             if force_decode:
                 self._complete_confirmation_count = 0
@@ -521,8 +689,12 @@ class SemanticVADController:
             self.fsm.record(output, context=semantic_context)
             return output
         output = self.fsm.step(FSMInput(audio_chunk=audio_chunk, speech=speech))
+        self._sem_confirmation_count = 0
         self._break_confirmation_count = 0
         self.fsm.record(output, context=semantic_context)
+        if speech and output.state == InputState.JUDGE:
+            return await self._process_judge(
+                None, speech=True, semantic_context=semantic_context)
         return output
 
 
@@ -533,6 +705,10 @@ class SemanticVADConfig:
     silence_duration_ms: int = 500
     min_speech_duration_ms: int = 96
     max_buffered_chunks: int = 512
+    vasd_window_ms: int = 8000
+    sem_probability_threshold: float = 0.8
+    sem_margin_threshold: float = 1.5
+    sem_confirmations: int = 1
     break_probability_threshold: float = 0.8
     break_margin_threshold: float = 1.5
     break_confirmations: int = 1
@@ -550,6 +726,10 @@ class SemanticVADConfig:
             "silence_duration_ms",
             "min_speech_duration_ms",
             "max_buffered_chunks",
+            "vasd_window_ms",
+            "sem_probability_threshold",
+            "sem_margin_threshold",
+            "sem_confirmations",
             "break_probability_threshold",
             "break_margin_threshold",
             "break_confirmations",
@@ -589,6 +769,37 @@ class SemanticVADConfig:
         max_chunks = value.get("max_buffered_chunks", 512)
         if not isinstance(max_chunks, int) or isinstance(max_chunks, bool) or max_chunks <= 0:
             raise ValueError("semantic_vad.max_buffered_chunks must be a positive integer")
+        vasd_window_ms = value.get("vasd_window_ms", 8000)
+        if (
+            not isinstance(vasd_window_ms, int | float)
+            or isinstance(vasd_window_ms, bool)
+            or not math.isfinite(float(vasd_window_ms))
+            or float(vasd_window_ms) <= 0
+        ):
+            raise ValueError("semantic_vad.vasd_window_ms must be a positive number")
+        sem_probability = value.get("sem_probability_threshold", 0.8)
+        if (
+            not isinstance(sem_probability, int | float)
+            or isinstance(sem_probability, bool)
+            or not math.isfinite(float(sem_probability))
+            or not 0.0 <= float(sem_probability) <= 1.0
+        ):
+            raise ValueError("semantic_vad.sem_probability_threshold must be within [0, 1]")
+        sem_margin = value.get("sem_margin_threshold", 1.5)
+        if (
+            not isinstance(sem_margin, int | float)
+            or isinstance(sem_margin, bool)
+            or not math.isfinite(float(sem_margin))
+            or float(sem_margin) < 0
+        ):
+            raise ValueError("semantic_vad.sem_margin_threshold must be non-negative")
+        sem_confirmations = value.get("sem_confirmations", 1)
+        if (
+            not isinstance(sem_confirmations, int)
+            or isinstance(sem_confirmations, bool)
+            or sem_confirmations <= 0
+        ):
+            raise ValueError("semantic_vad.sem_confirmations must be a positive integer")
         break_probability = value.get("break_probability_threshold", 0.8)
         if (
             not isinstance(break_probability, int | float)
@@ -642,6 +853,10 @@ class SemanticVADConfig:
         return cls(
             threshold=float(threshold),
             max_buffered_chunks=max_chunks,
+            vasd_window_ms=int(vasd_window_ms),
+            sem_probability_threshold=float(sem_probability),
+            sem_margin_threshold=float(sem_margin),
+            sem_confirmations=sem_confirmations,
             break_probability_threshold=float(break_probability),
             break_margin_threshold=float(break_margin),
             break_confirmations=break_confirmations,
@@ -691,6 +906,10 @@ class SemanticRealtimeAdapter:
         self.controller = SemanticVADController(
             provider,
             max_buffered_chunks=config.max_buffered_chunks,
+            vasd_window_ms=config.vasd_window_ms,
+            sem_probability_threshold=config.sem_probability_threshold,
+            sem_margin_threshold=config.sem_margin_threshold,
+            sem_confirmations=config.sem_confirmations,
             break_probability_threshold=config.break_probability_threshold,
             break_margin_threshold=config.break_margin_threshold,
             break_confirmations=config.break_confirmations,
@@ -827,7 +1046,8 @@ class SemanticRealtimeAdapter:
             self._remember_prefix(chunk)
         commands: list[dict[str, object]] = []
         if output.event == InputEvent.PREFILL:
-            commands.append({"type": "barge_in"})
+            if output.interrupt:
+                commands.append({"type": "barge_in"})
             commands.extend(dict(item) for item in output.prefill_audio or ())
         elif output.event == InputEvent.CHUNK_PREFILL:
             commands.extend(dict(item) for item in output.prefill_audio or ())
@@ -856,24 +1076,68 @@ def _chunk_duration_ms(chunk: Mapping[str, object]) -> float:
     return byte_count / sample_width * 1000.0 / float(sample_rate)
 
 
-_VASD_CODES = {"A": BREAK_TOKEN, "B": NO_BREAK_TOKEN, "C": SemanticLabel.REJECT.value}
-_VAED_CODES = {"A": COMPLETE_TOKEN, "B": INCOMPLETE_TOKEN}
-_CODE_TOKEN_IDS = {"A": 32, "B": 33, "C": 34}
+_VASD_SEM_CODES = {"有": "SEMANTIC", "无": "NO_SEMANTIC"}
+_VASD_BREAK_CODES = {"有": BREAK_TOKEN, "无": NO_BREAK_TOKEN}
+_VAED_CODES = {"已": COMPLETE_TOKEN, "未": INCOMPLETE_TOKEN}
+_CODE_TOKEN_IDS = {
+    "有": 18830,
+    "无": 42192,
+    "已": 36667,
+    "未": 38342,
+}
 
-DEFAULT_VASD_PROMPT = """你是双工语音助手的语义打断分类器。请根据候选用户音频，只输出一个分类码：
-A：用户正在对助手表达有意义的请求或问题，应当打断助手，对应 <b>；
-B：音频内容可以理解，但不应打断助手，对应 </b>；
-C：没有可接受的有效语义，例如环境噪声或无法辨认的声音，对应 REJECT。
-只能输出 A、B 或 C，不得解释。"""
+DEFAULT_VASD_SEM_PROMPT = """你是实时语音语义有效性分类器。
+请判断当前音频窗口是否包含可识别、可进入对话上下文的语言语义。
 
-DEFAULT_VAED_PROMPT = """你是双工语音助手的语义结束分类器。请根据当前累计的用户音频，只输出一个分类码：
-A：用户语义已经完整，助手可以开始回答，对应 <c>；
-B：用户仍在表达未完成的意思，需要继续聆听，对应 </c>。
-只能输出 A 或 B，不得解释。"""
+判定为“有”：
+- 用户说出了可以理解的词语、句子、问题、请求、陈述、附和或反馈。
+- 内容可能完整也可能未完整，但已经包含可识别语义。
 
-DEFAULT_CHAT_PROMPT = """你是一个实时语音对话助手。请直接理解用户音频并回答用户的问题。
+判定为“无”：
+- 静音、环境噪声、纯非语言声音。
+- 无法辨认或不包含可理解语言语义的声音。
+
+只能输出“有”或“无”之一；不得输出空格、换行、解释或任何其他内容。"""
+
+DEFAULT_VASD_BREAK_PROMPT = """你是一个实时语音语义边界判断助手。
+你的任务是根据输入的语音信号，隐式理解语音内容，判断当前语音是否已经表达出打断助手的意图。
+
+判定为“有”：
+- 叫停或插话，例如“等等”“先别说”“我想问”。
+- 反驳或否定，例如“不对”“你错了”“我不同意”。
+- 急切表达、抢话或明确转移话题。
+
+判定为“无”：
+- 语气词，例如“嗯”“哦”“啊”“呃”“Well”“Oh”“Hum”。
+- 附和，例如“对对对”“嗯你说得对”“是的”“挺好的”“you are right”“yeah”“Oh, good”。
+- 表达继续听的兴趣，例如“继续”“然后呢”“有点意思”。
+- 非语言声音，例如笑声、咳嗽声、背景声或噪声。
+
+只能输出“有”或“无”之一；不得输出空格、换行、解释或任何其他内容。"""
+
+# Backward-compatible import name for callers that still expect one VASD prompt.
+DEFAULT_VASD_PROMPT = DEFAULT_VASD_BREAK_PROMPT
+
+DEFAULT_VAED_PROMPT = """你是一个实时语音语义边界判断助手。
+你的任务是根据输入的语音信号，隐式理解语音内容，判断当前累计语音是否已经形成完整表达。
+
+判定为“已”：
+- 已表达完整语义。
+- 句子自然结束，例如陈述、评价、祈使、感叹或附和。
+- 存在明确交接信号，例如提问、请求反馈或征询意见。
+
+判定为“未”：
+- 句子明显缺失、截断或悬空。
+- 表达仍在进行中。
+- 正在思考或犹豫，语义尚未收束。
+
+只能输出“已”或“未”之一；不得输出空格、换行、解释或任何其他内容。"""
+
+DEFAULT_CHAT_PROMPT = f"""你是一个实时语音对话助手。请直接理解用户音频并回答用户的问题。
 回复应自然、简洁、口语化，优先使用一到三句话；不要输出 Markdown，不要展示思考过程。
-始终使用用户所使用的语言回答。"""
+始终使用用户所使用的语言回答。
+
+{INTERRUPTED_CONTEXT_INSTRUCTION}"""
 CHAT_AUDIO_INSTRUCTION = "这是用户对你的提问。请直接回答问题，不要转写、复述或描述这段音频。"
 
 
@@ -885,12 +1149,33 @@ class MiMoSemanticVADProvider:
         self.mimo_url = mimo_url.rstrip("/")
         self.model = model
 
+    async def decide_sem(self, audio_chunks, *, context):
+        result = await self._classify(
+            audio_chunks,
+            system=_prompt_from_context(
+                context, "vasd_sem_prompt", DEFAULT_VASD_SEM_PROMPT),
+            request_kind="VASD_SEM",
+            code_map=_VASD_SEM_CODES,
+            context=context,
+        )
+        command = result["command"]
+        return VASDSemDecision(
+            command == "SEMANTIC",
+            result["raw_output"], command, True,
+            result["logprobs"], result["probability"], result["margin"],
+        )
+
     async def decide_break(self, audio_chunks, *, context):
         result = await self._classify(
             audio_chunks,
-            system=_prompt_from_context(context, "vasd_prompt", DEFAULT_VASD_PROMPT),
-            request_kind="VASD",
-            code_map=_VASD_CODES,
+            system=_prompt_from_context(
+                context,
+                "vasd_break_prompt",
+                _prompt_from_context(
+                    context, "vasd_prompt", DEFAULT_VASD_BREAK_PROMPT),
+            ),
+            request_kind="VASD_BREAK",
+            code_map=_VASD_BREAK_CODES,
             context=context,
         )
         command = result["command"]
@@ -900,8 +1185,7 @@ class MiMoSemanticVADProvider:
         if command == NO_BREAK_TOKEN:
             return VASDDecision(False, False, result["raw_output"], command, True,
                                 result["logprobs"], result["probability"], result["margin"])
-        return VASDDecision(False, True, result["raw_output"], command, True,
-                            result["logprobs"], result["probability"], result["margin"])
+        raise ValueError(f"Unexpected VASD command: {command!r}")
 
     async def decide_complete(self, audio_chunks, *, context):
         result = await self._classify(
@@ -969,9 +1253,9 @@ class MiMoSemanticVADProvider:
             )
         selected_code = max(code_logprobs, key=code_logprobs.get)
         raw_output = content
-        sampled_code = content.strip()
+        sampled_code = content
         if sampled_code not in code_map:
-            raise InvalidSemanticCommand(request_kind, content, tuple(code_map.values()))
+            raise InvalidSemanticCommand(request_kind, content, tuple(code_map))
         if sampled_code != selected_code:
             raise ValueError(
                 f"MiMo semantic VAD sampled code {sampled_code!r} differs from logprob argmax {selected_code!r}"
