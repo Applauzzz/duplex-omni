@@ -16,11 +16,15 @@ import time
 from typing import Protocol
 import wave
 
+import cv2
 import numpy as np
 
 
 LOG = logging.getLogger("mimo_tts.semantic_vad")
 SILERO_VAD_MIN_THRESHOLD = 0.15
+MAX_VIDEO_FRAME_BYTES = 512 * 1024
+MAX_VIDEO_FRAME_PIXELS = 1920 * 1080
+MAX_VIDEO_FRAMES = 32
 
 SPEECH_TOKEN = "<s>"
 NO_SPEECH_TOKEN = "</s>"
@@ -840,6 +844,14 @@ class SemanticRealtimeAdapter:
     def close(self) -> None:
         self.controller.fsm.close()
 
+    @staticmethod
+    def _audio_command(chunk: Mapping[str, object]) -> dict[str, object]:
+        return {
+            key: chunk[key]
+            for key in ("type", "audio", "format", "sample_rate_hz")
+            if key in chunk
+        }
+
     def _remember_prefix(self, chunk: dict[str, object]) -> None:
         self._prefix_audio.append(chunk)
         target_ms = self.config.prefix_padding_ms + self.config.min_speech_duration_ms + 32
@@ -865,6 +877,7 @@ class SemanticRealtimeAdapter:
         chunk = dict(payload)
         chunk["format"] = audio_format
         chunk["sample_rate_hz"] = sample_rate
+        validate_video_frame(chunk)
         vad_result = self.vad.process_base64(
             audio,
             fmt=audio_format,
@@ -942,11 +955,11 @@ class SemanticRealtimeAdapter:
         if output.event == InputEvent.PREFILL:
             if output.interrupt:
                 commands.append({"type": "barge_in"})
-            commands.extend(dict(item) for item in output.prefill_audio or ())
+            commands.extend(self._audio_command(item) for item in output.prefill_audio or ())
         elif output.event == InputEvent.CHUNK_PREFILL:
-            commands.extend(dict(item) for item in output.prefill_audio or ())
+            commands.extend(self._audio_command(item) for item in output.prefill_audio or ())
         elif output.event == InputEvent.DECODE:
-            commands.extend(dict(item) for item in output.prefill_audio or ())
+            commands.extend(self._audio_command(item) for item in output.prefill_audio or ())
             commands.append({
                 "type": "input_audio_buffer.commit",
                 "final": True,
@@ -1016,6 +1029,10 @@ DEFAULT_CHAT_PROMPT = f"""你是一个实时语音对话助手。请直接理解
 
 {INTERRUPTED_CONTEXT_INSTRUCTION}"""
 CHAT_AUDIO_INSTRUCTION = "这是用户对你的提问。请直接回答问题，不要转写、复述或描述这段音频。"
+CHAT_VIDEO_AUDIO_INSTRUCTION = (
+    "这是用户当前轮次的视频和语音。请结合视频内容理解并回答用户问题，"
+    "不要只转写、复述或描述音频。"
+)
 
 
 class MiMoSemanticVADProvider:
@@ -1164,22 +1181,48 @@ class MiMoChatProvider:
         messages: list[dict[str, object]] = [{"role": "system", "content": system}]
         for turn in history[-4:]:
             audio_data = turn.get("audio_wav") if isinstance(turn, Mapping) else None
+            video_data = turn.get("video_frames") if isinstance(turn, Mapping) else None
             assistant = turn.get("assistant") if isinstance(turn, Mapping) else None
             if isinstance(audio_data, str) and audio_data:
-                messages.append({"role": "user", "content": [
+                content: list[dict[str, object]] = []
+                if isinstance(video_data, str) and video_data:
+                    content.append(_chat_video_part(video_data))
+                content.extend((
                     _chat_audio_part(audio_data),
-                    {"type": "text", "text": CHAT_AUDIO_INSTRUCTION},
-                ]})
+                    {
+                        "type": "text",
+                        "text": (
+                            CHAT_VIDEO_AUDIO_INSTRUCTION
+                            if isinstance(video_data, str) and video_data
+                            else CHAT_AUDIO_INSTRUCTION
+                        ),
+                    },
+                ))
+                messages.append({"role": "user", "content": content})
             if isinstance(assistant, str) and assistant:
                 messages.append({"role": "assistant", "content": assistant})
         wav = audio_chunks_to_wav(audio_chunks)
         if len(wav) > 3 * 1024 * 1024:
             raise ValueError("Chat audio exceeds 3 MiB")
         wav_b64 = base64.b64encode(wav).decode("ascii")
-        messages.append({"role": "user", "content": [
+        video_frames = context.get("video_frames")
+        if video_frames is None:
+            video_frames = video_chunks_to_jpeg_sequence(audio_chunks)
+        content: list[dict[str, object]] = []
+        if isinstance(video_frames, str) and video_frames:
+            content.append(_chat_video_part(video_frames))
+        content.extend((
             _chat_audio_part(wav_b64),
-            {"type": "text", "text": CHAT_AUDIO_INSTRUCTION},
-        ]})
+            {
+                "type": "text",
+                "text": (
+                    CHAT_VIDEO_AUDIO_INSTRUCTION
+                    if isinstance(video_frames, str) and video_frames
+                    else CHAT_AUDIO_INSTRUCTION
+                ),
+            },
+        ))
+        messages.append({"role": "user", "content": content})
         request_id = str(context.get("request_id") or f"semantic-chat-{time.time_ns()}")
         payload = {
             "model": self.model,
@@ -1222,6 +1265,55 @@ def _chat_audio_part(wav_b64: str) -> dict[str, object]:
         "type": "input_audio",
         "input_audio": {"data": wav_b64, "format": "wav"},
     }
+
+
+def _chat_video_part(jpeg_sequence_b64: str) -> dict[str, object]:
+    return {
+        "type": "video_url",
+        "video_url": {"url": "data:video/jpeg;base64," + jpeg_sequence_b64},
+    }
+
+
+def validate_video_frame(chunk: Mapping[str, object]) -> None:
+    frame = chunk.get("video_frame")
+    if frame is None:
+        return
+    if not isinstance(frame, Mapping):
+        raise ValueError("video_frame must be an object")
+    if frame.get("format") != "jpeg":
+        raise ValueError("video_frame format must be jpeg")
+    encoded = frame.get("data")
+    if not isinstance(encoded, str) or not encoded:
+        raise ValueError("video_frame requires base64 data")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("video_frame contains invalid base64") from error
+    if len(raw) > MAX_VIDEO_FRAME_BYTES:
+        raise ValueError(f"video_frame exceeds {MAX_VIDEO_FRAME_BYTES} bytes")
+    image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None or image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError("video_frame is not a valid JPEG image")
+    height, width = image.shape[:2]
+    if width * height > MAX_VIDEO_FRAME_PIXELS:
+        raise ValueError("video_frame pixel count exceeds the limit")
+
+
+def video_chunks_to_jpeg_sequence(audio_chunks: Sequence[object]) -> str | None:
+    encoded_frames: list[str] = []
+    for chunk in audio_chunks:
+        if not isinstance(chunk, Mapping):
+            continue
+        frame = chunk.get("video_frame")
+        if isinstance(frame, Mapping) and isinstance(frame.get("data"), str):
+            validate_video_frame(chunk)
+            encoded_frames.append(frame["data"])
+    if not encoded_frames:
+        return None
+    if len(encoded_frames) > MAX_VIDEO_FRAMES:
+        indices = np.linspace(0, len(encoded_frames) - 1, MAX_VIDEO_FRAMES, dtype=int)
+        encoded_frames = [encoded_frames[index] for index in indices]
+    return ",".join(encoded_frames)
 
 
 async def _sse_data(stream):

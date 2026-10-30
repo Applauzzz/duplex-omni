@@ -27,6 +27,7 @@ from semantic_vad import (
     SemanticRealtimeAdapter,
     SemanticVADConfig,
     audio_chunks_to_wav,
+    video_chunks_to_jpeg_sequence,
 )
 from streaming_tts import IncrementalTextChunker, WeChatStreamingTTSProvider
 
@@ -222,6 +223,9 @@ async def websocket(request):
                     "audio_wav": audio_wav,
                     "assistant": partial + INTERRUPTION_MARKER,
                 }
+                video_frames = active_response.get("video_frames")
+                if isinstance(video_frames, str) and video_frames:
+                    retained_entry["video_frames"] = video_frames
         if active:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -266,9 +270,11 @@ async def websocket(request):
             },
         ) if response_settings["tts_enabled"] else None
         audio_wav = base64.b64encode(audio_chunks_to_wav(audio_chunks)).decode("ascii")
+        video_frames = video_chunks_to_jpeg_sequence(audio_chunks)
         active_response = {
             "turn_id": turn_id,
             "audio_wav": audio_wav,
+            "video_frames": video_frames,
             "text": "",
             "text_done": False,
         }
@@ -276,6 +282,10 @@ async def websocket(request):
             "type": "chat.started",
             "turn_id": turn_id,
             "audio_chunk_count": len(audio_chunks),
+            "video_frame_count": sum(
+                1 for item in audio_chunks
+                if isinstance(item, dict) and item.get("video_frame") is not None
+            ),
         })
         async def run_tts():
             total_samples = 0
@@ -360,7 +370,10 @@ async def websocket(request):
                 audio_chunks,
                 history=history,
                 prompt=chat_prompt,
-                context={"request_id": f"{session_id}-{turn_id}"},
+                context={
+                    "request_id": f"{session_id}-{turn_id}",
+                    "video_frames": video_frames,
+                },
             ):
                 text += delta
                 if isinstance(active_response, dict) and active_response.get("turn_id") == turn_id:
@@ -379,7 +392,10 @@ async def websocket(request):
                     for chunk in chunker.flush():
                         await tts_queue.put(chunk)
                     await tts_queue.put(None)
-            history.append({"audio_wav": audio_wav, "assistant": text})
+            history_entry = {"audio_wav": audio_wav, "assistant": text}
+            if video_frames is not None:
+                history_entry["video_frames"] = video_frames
+            history.append(history_entry)
             del history[:-4]
             await send({"type": "chat.done", "turn_id": turn_id, "text": text})
             chat_text_done = True
@@ -570,6 +586,8 @@ async def websocket(request):
                 "format": payload.get("format", "pcm16"),
                 "sample_rate_hz": payload.get("sample_rate_hz", 16000),
             }
+            if "video_frame" in payload:
+                append["video_frame"] = payload["video_frame"]
             try:
                 output, commands = await adapter.process_append(
                     append,
