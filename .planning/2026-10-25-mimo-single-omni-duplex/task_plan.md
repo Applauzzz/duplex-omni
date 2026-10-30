@@ -7,6 +7,27 @@ and Qwen3-TTS CustomVoice as the initial independent speech renderer.
 Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
+October29 Judge/BREAK observability correction: preserve mandatory VASD_SEM,
+change VASD_BREAK's constrained one-token surface from `需要/不需要` to `有/无`
+while retaining distinct `VASD_BREAK` telemetry and `<b>/</b>` policy commands.
+Repair the browser timeline so a returned `Judge -> *` transition inserts the
+missing Judge segment when the preceding visible state is Silence, and append a
+separate transition-log row for every parallel VASD_BREAK result. Verify with
+focused provider/page tests and one real MiMo playback-active probe, then roll
+only the owned 8080 SVAD process; preserve MiMo 8090 and external TTS 8100.
+
+October29 focused state-machine acceptance: the recovered dirty `feature/SVAD`
+implementation now has focused proof for parallel `vasd_sem` admission and
+playback-conditional `vasd_break`, semantic non-break admission without
+cancellation, default interrupted-output discard, and config-enabled retention
+with the verified one-token marker `⏸` plus explicit next-turn MiMo guidance.
+Five unique related test entry points pass; no broad safety-fixture suite was
+run. Core implementation/config changes pre-existed this Session and were
+preserved; this Session added end-to-end coverage and durable records. Next run
+the same policy against real MiMo/TTS/browser playback and representative noise,
+speech and barge-in audio before closing Phase 5. Do not overwrite the existing
+Stage 4/SVAD user changes or initialize another plan.
+
 October26 repository checkpoint: user accepts the basic MiMo+TTS integration
 for publication to origin/main and requests stopping current project services.
 Preserve the existing narrower completed slices and open wider gates; do not
@@ -123,6 +144,9 @@ by user request. Publication does not close the broader acceptance gates.
 | Use process-local PYTHONPATH for current submodules | Do not redirect old editable installs or mutate checkpoint folders |
 | Explicit UI interface binding for user-requested Mac direct access | Keep model APIs loopback; default UI remains loopback; use current server IP and historical port7865 |
 | User-directed manual-turn integration before closing all Phase2 diagnostics | Deliver MiMo-to-TTS hands-on use while keeping unresolved acceptance gates explicit |
+| Gate Judge admission with `vasd_sem`; use `vasd_break` only during active TTS playback | Semantic speech must pass even when it is not an interruption, while noise must not enter the turn; break intent is relevant only to cancellation |
+| Make interrupted assistant retention configurable and mark retained partial output with one token | Preserve the current discard default while allowing later turns to refer to the exact interruption point without automatically continuing the old answer |
+| Limit this state-machine change to at most five focused test entry points | User explicitly requested a compact suite; prioritize end-to-end WebSocket behavior and directly affected state/provider tests |
 
 ## Phase Deliverables and Acceptance
 

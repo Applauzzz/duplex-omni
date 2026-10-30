@@ -276,6 +276,75 @@
   `workspace/logs/20261028T053651Z_mimo_single_phase2_1babea77/`; supervisor
   PID303530 and UI PID303536. MiMo PID42095 remained unchanged. `/health`
   returned `mimo=true` at2.0ms and `/defaults` verified the final prompts.
+- Started Phase 8 on 2026-10-29 to render MiMo Chat text through the user-
+  supplied `wx_tts_ref.py` protocol. Initial live POST to
+  `29.213.195.135:8100/api/tts/stream` returned HTTP404. OpenAPI inspection
+  established that this address is the underlying CosyVoice3 Audio Engine,
+  not the wrapper: the real contract is `/submit` plus repeated `/poll`.
+- Added `streaming_tts.py` with strict submit/poll validation, bounded text and
+  audio duration, fixed sample-rate checks, PCM16 alignment, task/trace IDs,
+  speed/target-RMS validation and configurable `reg_id`. `/selftest` documents
+  `bench_spk` as pre-registered; direct live submit/poll succeeded at24kHz,
+  first PCM around191ms and108960 bytes total. The final provider probe
+  produced141360 bytes, first PCM around222ms and RMS0.0981.
+- Reused `backend.SpannedSplitter` so MiMo text remains visible as deltas while
+  complete sentence-level spans enter a bounded ordered TTS queue. Added typed
+  `tts.segment`, `tts.audio`, `tts.segment_done`, `tts.done`, `tts.error` and
+  `tts.cancelled` WebSocket events. Exact Chat output `listening` produces no
+  speech. TTS failure leaves `chat.done` text intact.
+- Added browser PCM16 scheduling with the actual event sample rate and a
+  separate playback `AudioContext`. New BREAK, reset, settings rebuild and Stop
+  invalidate queued playback. Cancellation distinguishes active text generation
+  (`chat.cancelled`) from text-complete/TTS-active playback (`tts.cancelled`).
+- Added local TTS settings `tts_enabled`, `tts_reg_id`, `tts_speed` and
+  `tts_target_rms`; defaults use the live-verified `bench_spk`. `/health` now
+  checks both MiMo and CosyVoice. The Audio Engine exposes no task-cancel route,
+  so cancellation stops local polling/playback but an upstream submitted task
+  may finish server-side.
+- Final focused suite on 2026-10-29 passed50/50 across semantic VAD, debug
+  WebSocket and submit/poll TTS contracts. JSON parsing, Python compile,
+  frontend JavaScript parse/marker checks and `git diff --check` passed.
+- Final live service is `svad18`, supervisor PID384641/UI PID384648, in
+  `workspace/logs/20261029T100508Z_mimo_single_phase2_5183e37a/`; MiMo
+  PID42095 was not restarted. `/health` returned `mimo=true`, `tts=true`.
+  Real saved speech replay used a session-local active-query VASD Prompt solely
+  to enter Chat without changing the default interruption policy. It produced
+  `PREFILL`, six `CHUNK_PREFILL`, `DECODE`, MiMo text `三加四等于七。`, one TTS
+  segment,71760 bytes of24kHz PCM with RMS0.08474 and no errors. Artifacts:
+  `mimo_tts_probe_20261029T100753Z/` under the `svad18` run.
+- User clarified that sentence-level independent TTS tasks were insufficient;
+  true streaming must append text to one TTS task before MiMo finishes. Live
+  protocol probes confirmed repeated submit calls with one `task_id` and
+  increasing `text_idx` are supported. `SmartSplit` still withheld PCM until
+  the final text chunk. `EagerTTSStrategy` emitted first PCM at0.202s while the
+  final text submit occurred at5.032s. The service also accepts an empty final
+  chunk, allowing clean completion without repeating text.
+- Reworked `streaming_tts.py` into a response-scoped incremental session. One
+  MiMo response now owns one TTS task; a bounded `IncrementalTextChunker`
+  submits punctuation or max-length chunks with consecutive indices and a
+  final empty chunk. Submit and poll workers run concurrently and are isolated
+  from MiMo generation failures. Local settings expose `tts_min_chars` default8
+  and `tts_max_chars` default48. The TTS strategy is fixed to the live-verified
+  `EagerTTSStrategy`.
+- Added `tts.text` observability with task ID, text index and final flag. A
+  controlled slow-Chat test proves `tts.audio` precedes `chat.done`; the full
+  Stage3+Stage4 suite now passes64/64. Exact `listening` cancels the unused TTS
+  session and clears playback ownership without submitting text.
+- Restarted the final incremental service as `svad19`, supervisor PID398843/UI
+  PID398850, in
+  `workspace/logs/20261029T105022Z_mimo_single_phase2_1c8df76f/`; MiMo
+  PID42095 was preserved. A real long-reply replay submitted eight non-final
+  text chunks plus one empty final chunk under one task ID with consecutive
+  indices0..8. First PCM arrived at1.425s, `chat.done` at1.997s, so speech led
+  completion by0.571s. It produced643920 bytes of24kHz PCM, RMS0.09398, with
+  no errors. Artifacts: `incremental_tts_probe_20261029T105801Z/`.
+- Loaded the final listening/playback ownership fix as `svad20`, supervisor
+  PID403725/UI PID403729, in
+  `workspace/logs/20261029T110613Z_mimo_single_phase2_bf96b206/`. MiMo
+  PID42095 remained unchanged. Final replay again used one task ID and indices
+  0..8; first PCM arrived at1.280s, `chat.done` at1.571s, a0.291s lead. It
+  produced636240 bytes of24kHz PCM at RMS0.09220 with no errors. Evidence:
+  `incremental_tts_probe_20261029T111056Z/`.
 
 ### Test Results
 | Test | Expected | Actual | Status |

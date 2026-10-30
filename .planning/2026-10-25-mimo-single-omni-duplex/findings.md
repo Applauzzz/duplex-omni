@@ -1,5 +1,52 @@
 # Findings & Decisions
 
+## 2026-10-29: Parallel Semantic Admission And Interrupt Retention Recovery
+- The selected plan remains `2026-10-25-mimo-single-omni-duplex`; no plan was
+  initialized or overwritten. The current branch is `feature/SVAD` and already
+  contains substantial uncommitted Stage 4/SVAD work that must be preserved.
+- Existing dirty code already contains the intended implementation skeleton:
+  `VASDSemDecision`, separate `vasd_sem_prompt`/`vasd_break_prompt`, browser
+  `tts_playback_active`, `retain_interrupted_context`, marker `⏸` with recorded
+  token id 149660, and a MiMo interrupted-context instruction. These are
+  pre-existing user changes and require verification/focused correction rather
+  than replacement.
+- Required behavior is two-dimensional: `vasd_sem` decides whether candidate
+  audio has usable language semantics and may enter Listen; only while TTS is
+  playing does `vasd_break` decide whether that admitted speech cancels the
+  active response. Semantic non-break speech is admitted but queued behind the
+  current response; noise is discarded.
+- Interrupted output retention must remain disabled by default. When enabled,
+  only actually generated partial assistant text is retained, suffixed exactly
+  once with the one-token interruption marker, and the next-turn Chat system
+  prompt must forbid implicit continuation unless the user asks about it.
+- Verification for this change is capped at five directly related test entry
+  points, with WebSocket end-to-end state/history/cancellation behavior first.
+- Focused WebSocket proof confirms two distinct admitted-speech paths while
+  browser playback is active: accepted `VASD_BREAK` cancels the current Chat/TTS
+  response, while `NO_BREAK` still produces PREFILL but does not cancel it.
+- With retention disabled, the cancellation event reports `retained=false`.
+  With retention enabled, generated partial text is stored exactly as
+  `partial + ⏸`, appears in the next Chat history, and the effective Chat prompt
+  contains the explicit instruction not to continue it unless the user asks.
+- Broader acceptance remains open: no real MiMo classifier request, GPU TTS,
+  browser playback, playback-position text ACK or acoustic noise corpus was run
+  in this Session.
+- UI policy is now explicit: VASD_SEM has no enable switch and is labelled
+  required. Its probability, margin and confirmation controls plus its Prompt
+  are always visible. VASD_BREAK has separate controls/Prompt and is labelled
+  playback-only. `retain_interrupted_context` is the optional checkbox.
+- The browser previously did not report actual PCM playback state, so production
+  microphone use could skip VASD_BREAK even though manual probes worked. The UI
+  now reports `playback.state=true` when PCM playback starts and false only after
+  the TTS stream and scheduled browser sources finish or are cancelled.
+- All three MiMo semantic classifiers use a masked two-token decision at one
+  generation position: VASD_SEM and VASD_BREAK independently constrain to
+  `有/无` (token IDs 18830/42192); VAED constrains to `已/未` (36667/38342).
+  `allowed_token_ids` excludes all other sampled tokens, `logprob_token_ids`
+  requests both candidates, and probability is a softmax normalized only over
+  that antagonist pair. AVAD/Silero and ordinary Chat generation are not part
+  of this token-classifier contract.
+
 ## Realtime Runner Integration Recovery
 - Recovery prompt snapshots from vadtest04 confirm Qwen final media-first
   formatting moves latest audio ahead of the unanswered old city text.

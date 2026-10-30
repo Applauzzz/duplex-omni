@@ -68,6 +68,12 @@
 | SVAD launchers must tolerate an unset `CUDA_VISIBLE_DEVICES` | The CPU-only UI inherited no such variable; the launch-manifest formatter now records an empty value rather than crashing after spawning the child |
 | Chinese constrained labels are valid single tokens | Direct `tokenizer.json` encoding gave `已=36667`、`未=38342`、`需要=85106`、`不需要=104689`; leading-space variants are multi-token and must not be emitted |
 | Live MiMo accepts the Chinese masks | On 2026-10-28, VASD `[85106,104689]` returned `需要` with both candidate logprobs; VAED `[36667,38342]` returned `未` with both candidate logprobs |
+| `wx_tts_ref.py` defines two protocol layers | Its FastAPI wrapper exposes `/api/tts/stream`, but the supplied `29.213.195.135:8100` address is the underlying CosyVoice3 Audio Engine and must be called with POST `/submit` then repeated POST `/poll` |
+| Existing Stage 3 splitter is reusable | `backend.SpannedSplitter` already turns incremental MiMo deltas into bounded sentence-level text spans suitable for ordered independent TTS requests |
+| Live Audio Engine contract is verified | `/health` identifies CosyVoice3 at 24 kHz; `bench_spk` is documented by `/selftest` and direct submit/poll produced first PCM in about 191-222 ms with nonzero RMS |
+| Audio Engine has no task cancel route | Its OpenAPI exposes health, submit, poll and speaker management only. Local cancellation stops poll and browser playback but cannot abort an already submitted upstream task |
+| SmartSplit is not perceptibly streaming for this API | Live three-chunk tests showed first PCM only after `is_text_complete=true`, even when the first non-final chunk was a complete sentence |
+| EagerTTSStrategy provides true incremental output | With one task and non-final complete-sentence chunks, first PCM arrived at0.202s while final text was submitted at5.032s; an empty final chunk is accepted and closes the stream without duplicate speech |
 
 ## Issues Encountered
 | Issue | Resolution |

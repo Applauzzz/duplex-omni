@@ -356,7 +356,7 @@ class FakeResponse:
         if isinstance(self.content, dict):
             return self.content
         sampled = self.content.strip()
-        scores = {"已": -3.0, "未": -3.0, "需要": -3.0, "不需要": -3.0}
+        scores = {"有": -3.0, "无": -3.0, "已": -3.0, "未": -3.0}
         if sampled in scores:
             scores[sampled] = -0.1
         return {"choices": [{
@@ -382,15 +382,15 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_mimo_binary_vasd_and_vaed_labels(self):
         pcm = base64.b64encode(b"\0\0" * 160).decode()
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
-        client = FakeClient(["需要", "不需要", "未", "已"])
+        client = FakeClient(["有", "无", "未", "已"])
         provider = MiMoSemanticVADProvider(client, "http://mimo")
         self.assertEqual(await provider.decide_break(chunks, context={}), VASDDecision(True, False))
         self.assertEqual(await provider.decide_break(chunks, context={}), VASDDecision(False, False))
         self.assertEqual(await provider.decide_complete(chunks, context={}), VAEDDecision(False))
         self.assertEqual(await provider.decide_complete(chunks, context={}), VAEDDecision(True))
         self.assertTrue(all(request[1]["json"]["stream"] is False for request in client.requests))
-        self.assertEqual(client.requests[0][1]["json"]["allowed_token_ids"], [85106, 104689])
-        self.assertEqual(client.requests[0][1]["json"]["logprob_token_ids"], [85106, 104689])
+        self.assertEqual(client.requests[0][1]["json"]["allowed_token_ids"], [18830, 42192])
+        self.assertEqual(client.requests[0][1]["json"]["logprob_token_ids"], [18830, 42192])
         self.assertEqual(client.requests[2][1]["json"]["allowed_token_ids"], [36667, 38342])
         self.assertEqual(client.requests[-1][1]["json"]["allowed_token_ids"], [36667, 38342])
         self.assertTrue(all(request[1]["json"]["max_tokens"] == 1 for request in client.requests))
@@ -398,10 +398,10 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_chinese_code_is_valid_but_whitespace_and_explanations_are_invalid(self):
         pcm = base64.b64encode(b"\0\0" * 160).decode()
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
-        provider = MiMoSemanticVADProvider(FakeClient(["需要", "答案：已", "已 "]), "http://mimo")
+        provider = MiMoSemanticVADProvider(FakeClient(["有", "答案：已", "已 "]), "http://mimo")
         decision = await provider.decide_break(chunks, context={})
         self.assertEqual(decision.command, "<b>")
-        self.assertEqual(decision.raw_output, "需要")
+        self.assertEqual(decision.raw_output, "有")
         self.assertEqual(set(decision.logprobs), {"<b>", "</b>"})
         self.assertGreater(decision.probability, .8)
         with self.assertRaises(InvalidSemanticCommand) as caught:
@@ -415,7 +415,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_ambiguous_model_output_is_rejected(self):
         pcm = base64.b64encode(b"\0\0" * 160).decode()
         chunks = [{"audio": pcm, "format": "pcm16", "sample_rate_hz": 16000}]
-        provider = MiMoSemanticVADProvider(FakeClient(["需要或不需要"]), "http://mimo")
+        provider = MiMoSemanticVADProvider(FakeClient(["有或无"]), "http://mimo")
         with self.assertRaises(ValueError):
             await provider.decide_break(chunks, context={})
 
