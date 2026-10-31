@@ -104,6 +104,26 @@ class SlowChatProvider:
         yield "现在是第二句。"
 
 
+class AgentBridgeChatProvider:
+    def __init__(self):
+        self.calls = []
+
+    async def stream_reply(self, audio_chunks, *, history, prompt, context):
+        self.calls.append({
+            "agent_config": dict(context["agent_config"]),
+            "audio_chunks": tuple(audio_chunks),
+        })
+        output = await context["agent_tool_handler"]({
+            "id": "call-weather",
+            "type": "function",
+            "function": {
+                "name": "lookup_weather",
+                "arguments": "{\"city\":\"北京\"}",
+            },
+        })
+        yield "工具返回：" + output
+
+
 class TTSSession:
     def __init__(self, provider, request_id):
         self.provider = provider
@@ -258,6 +278,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         for token in ("&lt;s&gt;", "&lt;/s&gt;", "SEMANTIC", "NO_SEMANTIC",
                       "&lt;c&gt;", "&lt;/c&gt;"):
             self.assertIn(token, html)
+
         self.assertIn("if(last.state!==t.previous_state)", html)
         self.assertIn("last=addSegment(t.previous_state)", html)
         self.assertIn("playback barge-in", html)
@@ -299,6 +320,151 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             worklet = await response.text()
         self.assertEqual(response.status, 200)
         self.assertIn("fullduplex-pcm-capture", worklet)
+
+    async def test_agent_function_call_round_trip_continues_chat(self):
+        class EndpointVAD:
+            def __init__(self):
+                self.values = iter((True, True, False))
+                self.last_active = False
+
+            def process_base64(self, *_args, **_kwargs):
+                active = next(self.values)
+                stopped = not active and self.last_active
+                self.last_active = active
+                return SimpleNamespace(
+                    is_speech=active,
+                    speech_active=active,
+                    speech_started=False,
+                    speech_stopped=stopped,
+                    speech_probability=.91 if active else .0,
+                )
+
+            def reset(self):
+                pass
+
+        bridge = AgentBridgeChatProvider()
+        self.app["chat_provider"] = bridge
+        self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+            SemanticRealtimeAdapter(config, provider, vad=EndpointVAD())
+        )
+        async with asyncio.timeout(5):
+            ws = await self.client.ws_connect(self.server.make_url("/ws"))
+            await ws.send_json({
+                "type": "agent.session.update",
+                "instructions": "Use tools for current weather.",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "lookup_weather",
+                        "description": "Look up weather",
+                        "parameters": {"type": "object"},
+                    },
+                }],
+            })
+            self.assertEqual((await ws.receive_json())["type"], "agent.session.updated")
+            await ws.send_json({
+                "type": "configure",
+                "min_speech_duration_ms": 32,
+                "complete_confirmations": 1,
+            })
+            self.assertEqual((await ws.receive_json())["type"], "configured")
+            pcm = base64.b64encode(
+                (np.ones(512, dtype="<i2") * 12000).tobytes()
+            ).decode()
+            payload = {
+                "type": "audio",
+                "audio": pcm,
+                "format": "pcm16",
+                "sample_rate_hz": 16000,
+            }
+            for _ in range(3):
+                await ws.send_json(payload)
+                self.assertEqual((await ws.receive_json())["type"], "transition")
+            self.assertEqual((await ws.receive_json())["type"], "chat.started")
+            function_call = await ws.receive_json()
+            self.assertEqual(function_call, {
+                "type": "agent.function_call",
+                "turn_id": 3,
+                "call_id": "call-weather",
+                "name": "lookup_weather",
+                "arguments": "{\"city\":\"北京\"}",
+            })
+            await ws.send_json({
+                "type": "agent.function_call_output",
+                "call_id": "call-weather",
+                "output": "{\"condition\":\"sunny\"}",
+            })
+            delta = await ws.receive_json()
+            done = await ws.receive_json()
+            self.assertEqual(delta["type"], "chat.delta")
+            self.assertEqual(delta["delta"], '工具返回：{"condition":"sunny"}')
+            self.assertEqual(done["type"], "chat.done")
+            self.assertEqual(bridge.calls[0]["agent_config"]["instructions"],
+                             "Use tools for current weather.")
+            await ws.close()
+
+    async def test_agent_response_cancel_stops_current_chat(self):
+        class EndpointVAD:
+            def __init__(self):
+                self.values = iter((True, True, False))
+                self.last_active = False
+
+            def process_base64(self, *_args, **_kwargs):
+                active = next(self.values)
+                stopped = not active and self.last_active
+                self.last_active = active
+                return SimpleNamespace(
+                    is_speech=active,
+                    speech_active=active,
+                    speech_started=False,
+                    speech_stopped=stopped,
+                    speech_probability=.91 if active else .0,
+                )
+
+            def reset(self):
+                pass
+
+        blocking = BlockingChatProvider()
+        self.app["chat_provider"] = blocking
+        self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+            SemanticRealtimeAdapter(config, provider, vad=EndpointVAD())
+        )
+        async with asyncio.timeout(5):
+            ws = await self.client.ws_connect(self.server.make_url("/ws"))
+            await ws.send_json({
+                "type": "agent.session.update",
+                "instructions": "Answer directly.",
+                "tools": [],
+            })
+            self.assertEqual((await ws.receive_json())["type"], "agent.session.updated")
+            await ws.send_json({
+                "type": "configure",
+                "min_speech_duration_ms": 32,
+                "complete_confirmations": 1,
+                "retain_interrupted_context": False,
+            })
+            self.assertEqual((await ws.receive_json())["type"], "configured")
+            pcm = base64.b64encode(
+                (np.ones(512, dtype="<i2") * 12000).tobytes()
+            ).decode()
+            payload = {
+                "type": "audio",
+                "audio": pcm,
+                "format": "pcm16",
+                "sample_rate_hz": 16000,
+            }
+            for _ in range(3):
+                await ws.send_json(payload)
+                self.assertEqual((await ws.receive_json())["type"], "transition")
+            self.assertEqual((await ws.receive_json())["type"], "chat.started")
+            self.assertEqual((await ws.receive_json())["type"], "chat.delta")
+            await ws.send_json({"type": "response.cancel"})
+            cancelled = await ws.receive_json()
+            self.assertEqual(cancelled["type"], "chat.cancelled")
+            self.assertEqual(cancelled["reason"], "agent_interrupt")
+            self.assertFalse(cancelled["retained"])
+            await asyncio.wait_for(blocking.cancelled.wait(), 1)
+            await ws.close()
 
     async def test_defaults_reread_local_file_on_every_refresh(self):
         async with self.client.get(self.server.make_url("/defaults")) as response:

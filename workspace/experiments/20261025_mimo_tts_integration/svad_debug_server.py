@@ -14,6 +14,7 @@ import uuid
 
 from aiohttp import ClientSession, WSMsgType, web
 
+from agent_runtime import AgenticMiMoChatProvider
 from backend import client_timeout
 from semantic_vad import (
     DEFAULT_CHAT_PROMPT,
@@ -172,6 +173,81 @@ async def defaults(request):
     return web.json_response(payload, headers={"Cache-Control": "no-store"})
 
 
+async def agent_frontend_proxy(request):
+    tail = request.match_info.get("tail", "")
+    if request.path == "/agent":
+        target_path = "/agent"
+    elif request.path == "/duplex_pcm_capture.js":
+        target_path = request.path
+    elif request.path.startswith("/api/tools/"):
+        target_path = request.path
+    else:
+        target_path = "/_next/" + tail
+    target = request.app["agent_frontend_url"] + target_path
+    if request.query_string:
+        target += "?" + request.query_string
+    body = await request.read()
+    async with request.app["client"].request(
+        request.method,
+        target,
+        data=body if body else None,
+        headers={
+            key: value for key, value in request.headers.items()
+            if key.lower() not in {
+                "host", "connection", "upgrade", "content-length",
+            }
+        },
+        allow_redirects=False,
+    ) as response:
+        body = await response.read()
+        headers = {
+            key: value for key, value in response.headers.items()
+            if key.lower() not in {
+                "content-length", "transfer-encoding", "connection",
+                "content-encoding",
+            }
+        }
+        return web.Response(body=body, status=response.status, headers=headers)
+
+
+async def agent_websocket_proxy(request):
+    browser = web.WebSocketResponse(max_msg_size=2 * 1024 * 1024, heartbeat=20)
+    await browser.prepare(request)
+    async with request.app["client"].ws_connect(
+        request.app["agent_backend_url"] + "/ws",
+        max_msg_size=2 * 1024 * 1024,
+        heartbeat=20,
+    ) as backend:
+        async def browser_to_backend():
+            async for message in browser:
+                if message.type == WSMsgType.TEXT:
+                    await backend.send_str(message.data)
+                elif message.type == WSMsgType.BINARY:
+                    await backend.send_bytes(message.data)
+                elif message.type in {WSMsgType.CLOSE, WSMsgType.ERROR}:
+                    break
+
+        async def backend_to_browser():
+            async for message in backend:
+                if message.type == WSMsgType.TEXT:
+                    await browser.send_str(message.data)
+                elif message.type == WSMsgType.BINARY:
+                    await browser.send_bytes(message.data)
+                elif message.type in {WSMsgType.CLOSE, WSMsgType.ERROR}:
+                    break
+
+        tasks = {
+            asyncio.create_task(browser_to_backend()),
+            asyncio.create_task(backend_to_browser()),
+        }
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*done, *pending, return_exceptions=True)
+    await browser.close()
+    return browser
+
+
 async def websocket(request):
     ws = web.WebSocketResponse(max_msg_size=2 * 1024 * 1024, heartbeat=20)
     await ws.prepare(request)
@@ -182,6 +258,8 @@ async def websocket(request):
     local_config = dict(local_settings["config"])
     prompts = dict(local_settings["prompts"])
     history: list[dict[str, str]] = []
+    agent_config: dict[str, object] = {}
+    pending_tool_calls: dict[str, asyncio.Future[str]] = {}
     chat_task = None
     chat_turn_id = None
     chat_tts_enabled = False
@@ -236,6 +314,10 @@ async def websocket(request):
         chat_tts_enabled = False
         chat_text_done = False
         retained = False
+        for future in pending_tool_calls.values():
+            if not future.done():
+                future.cancel()
+        pending_tool_calls.clear()
         if retained_entry is not None:
             history.append(retained_entry)
             del history[:-4]
@@ -255,6 +337,36 @@ async def websocket(request):
     async def run_chat(turn_id, audio_chunks, chat_prompt):
         nonlocal chat_text_done, chat_tts_enabled, active_response
         text = ""
+
+        async def run_agent_tool(call):
+            call_id = call.get("id")
+            function = call.get("function")
+            if not isinstance(call_id, str) or not call_id:
+                raise RuntimeError("MiMo agent tool call requires an id")
+            if not isinstance(function, dict):
+                raise RuntimeError("MiMo agent tool call requires a function")
+            future = asyncio.get_running_loop().create_future()
+            pending_tool_calls[call_id] = future
+            await send({
+                "type": "agent.function_call",
+                "turn_id": turn_id,
+                "call_id": call_id,
+                "name": function.get("name"),
+                "arguments": function.get("arguments", "{}"),
+            })
+            LOG.info(
+                "agent_function_call session=%s turn=%s call_id=%s name=%s arguments=%s",
+                session_id,
+                turn_id,
+                call_id,
+                function.get("name"),
+                str(function.get("arguments", "{}"))[:500],
+            )
+            try:
+                return await future
+            finally:
+                pending_tool_calls.pop(call_id, None)
+
         chunker = IncrementalTextChunker(
             min_chars=response_settings["tts_min_chars"],
             max_chars=response_settings["tts_max_chars"],
@@ -287,6 +399,21 @@ async def websocket(request):
                 if isinstance(item, dict) and item.get("video_frame") is not None
             ),
         })
+        LOG.info(
+            "agent_chat_started session=%s turn=%s audio_chunks=%s video_frames=%s tools=%s",
+            session_id,
+            turn_id,
+            len(audio_chunks),
+            sum(
+                1 for item in audio_chunks
+                if isinstance(item, dict) and item.get("video_frame") is not None
+            ),
+            [
+                item.get("function", {}).get("name")
+                for item in agent_config.get("tools", [])
+                if isinstance(item, dict)
+            ],
+        )
         async def run_tts():
             total_samples = 0
             submitted_chunks = 0
@@ -373,6 +500,8 @@ async def websocket(request):
                 context={
                     "request_id": f"{session_id}-{turn_id}",
                     "video_frames": video_frames,
+                    "agent_config": agent_config,
+                    "agent_tool_handler": run_agent_tool,
                 },
             ):
                 text += delta
@@ -560,6 +689,38 @@ async def websocket(request):
                 update_prompts(payload)
                 await send({"type": "prompts.updated", "prompts": dict(prompts)})
                 continue
+            if event_type == "agent.session.update":
+                instructions = payload.get("instructions")
+                tools = payload.get("tools", [])
+                if not isinstance(instructions, str) or not instructions.strip():
+                    raise ValueError("agent.session.update requires instructions")
+                if not isinstance(tools, list):
+                    raise ValueError("agent.session.update tools must be an array")
+                agent_config.clear()
+                agent_config.update({"instructions": instructions, "tools": tools})
+                LOG.info(
+                    "agent_session_updated session=%s tools=%s",
+                    session_id,
+                    [
+                        item.get("function", {}).get("name")
+                        for item in tools if isinstance(item, dict)
+                    ],
+                )
+                await send({"type": "agent.session.updated"})
+                continue
+            if event_type == "agent.function_call_output":
+                call_id = payload.get("call_id")
+                output = payload.get("output")
+                future = pending_tool_calls.get(call_id)
+                if future is None or future.done():
+                    raise ValueError(f"Unknown agent tool call: {call_id!r}")
+                if not isinstance(output, str):
+                    raise ValueError("agent tool output must be a string")
+                future.set_result(output)
+                continue
+            if event_type == "response.cancel":
+                await cancel_chat("agent_interrupt")
+                continue
             if event_type == "playback.state":
                 tts_playback_active = bool(payload.get("active"))
                 if not tts_playback_active:
@@ -571,6 +732,7 @@ async def websocket(request):
                     adapter.reset()
                 sequence = 0
                 history.clear()
+                agent_config.clear()
                 pending_decode = None
                 tts_playback_active = False
                 await send({"type": "reset", "session_id": session_id})
@@ -665,7 +827,10 @@ async def context(app):
     async with ClientSession(trust_env=False, timeout=client_timeout()) as client:
         app["client"] = client
         app["semantic_provider"] = MiMoSemanticVADProvider(client, app["mimo_url"])
-        app["chat_provider"] = MiMoChatProvider(client, app["mimo_url"])
+        if not app["agentic"]:
+            app["chat_provider"] = MiMoChatProvider(client, app["mimo_url"])
+        else:
+            app["chat_provider"] = AgenticMiMoChatProvider(client, app["mimo_url"])
         app["tts_provider"] = WeChatStreamingTTSProvider(client, app["tts_url"])
         yield
 
@@ -675,11 +840,17 @@ def create_app(
     mimo_url="http://127.0.0.1:8090",
     tts_url="http://29.213.195.135:8100",
     config_path=DEFAULT_CONFIG_PATH,
+    agentic=False,
+    agent_frontend_url="http://127.0.0.1:3000",
+    agent_backend_url="http://127.0.0.1:8081",
 ):
     app = web.Application(client_max_size=2 * 1024 * 1024)
     app["mimo_url"] = mimo_url.rstrip("/")
     app["tts_url"] = tts_url.rstrip("/")
     app["config_path"] = Path(config_path)
+    app["agentic"] = bool(agentic)
+    app["agent_frontend_url"] = agent_frontend_url.rstrip("/")
+    app["agent_backend_url"] = agent_backend_url.rstrip("/")
     app["adapter_factory"] = SemanticRealtimeAdapter
     app.cleanup_ctx.append(context)
     app.router.add_get("/", index)
@@ -688,6 +859,11 @@ def create_app(
     app.router.add_get("/ws", websocket)
     app.router.add_get("/capture_worklet.js", lambda _request: web.FileResponse(
         Path(__file__).parents[3] / "vllm-omni/examples/online_serving/realtime_web/app/static/pcm_worklet.js"))
+    app.router.add_route("*", "/agent", agent_frontend_proxy)
+    app.router.add_route("*", "/_next/{tail:.*}", agent_frontend_proxy)
+    app.router.add_route("*", "/duplex_pcm_capture.js", agent_frontend_proxy)
+    app.router.add_route("*", "/api/tools/{tail:.*}", agent_frontend_proxy)
+    app.router.add_get("/agent-ws", agent_websocket_proxy)
     return app
 
 
@@ -698,6 +874,10 @@ def main():
     parser.add_argument("--mimo-url", default="http://127.0.0.1:8090")
     parser.add_argument("--tts-url", default="http://29.213.195.135:8100")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--agentic", action="store_true",
+                        help="Enable the OpenAI Agents SDK bridge protocol")
+    parser.add_argument("--agent-frontend-url", default="http://127.0.0.1:3000")
+    parser.add_argument("--agent-backend-url", default="http://127.0.0.1:8081")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -705,6 +885,9 @@ def main():
         mimo_url=args.mimo_url,
         tts_url=args.tts_url,
         config_path=args.config,
+        agentic=args.agentic,
+        agent_frontend_url=args.agent_frontend_url,
+        agent_backend_url=args.agent_backend_url,
     ), host=args.host, port=args.port,
                 handler_cancellation=True)
 
