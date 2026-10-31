@@ -11,7 +11,28 @@ from pathlib import Path
 import uuid
 import wave
 
+import cv2
+import numpy as np
 from aiohttp import ClientSession, ClientTimeout
+
+
+VIDEO_COLORS = (
+    ("red", (0, 0, 255)),
+    ("green", (0, 255, 0)),
+    ("blue", (255, 0, 0)),
+)
+
+
+def color_frame(index: int) -> dict[str, str]:
+    name, bgr = VIDEO_COLORS[min(index, len(VIDEO_COLORS) - 1)]
+    image = np.full((224, 224, 3), bgr, dtype=np.uint8)
+    cv2.putText(
+        image, name.upper(), (22, 112), cv2.FONT_HERSHEY_SIMPLEX,
+        1.0, (255, 255, 255), 2, cv2.LINE_AA)
+    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise RuntimeError("JPEG probe frame encoding failed")
+    return {"format": "jpeg", "data": base64.b64encode(encoded.tobytes()).decode()}
 
 
 async def main() -> None:
@@ -21,6 +42,8 @@ async def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--playback-active", action="store_true")
     parser.add_argument("--stop-after-semantic", action="store_true")
+    parser.add_argument("--video-colors", action="store_true")
+    parser.add_argument("--video-frame-limit", type=int, default=0)
     args = parser.parse_args()
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -54,13 +77,25 @@ async def main() -> None:
             if args.playback_active:
                 await ws.send_json({"type": "playback.state", "active": True})
 
-            async def send_audio(data: bytes) -> bool:
-                await ws.send_json({
+            sent_video_frames = 0
+
+            async def send_audio(data: bytes, *, frame_index: int | None = None) -> bool:
+                nonlocal sent_video_frames
+                payload = {
                     "type": "audio",
                     "audio": base64.b64encode(data).decode("ascii"),
                     "format": "pcm16",
                     "sample_rate_hz": sample_rate_hz,
-                })
+                }
+                if (
+                    args.video_colors
+                    and frame_index is not None
+                    and (args.video_frame_limit <= 0
+                         or sent_video_frames < args.video_frame_limit)
+                ):
+                    payload["video_frame"] = color_frame(frame_index)
+                    sent_video_frames += 1
+                await ws.send_json(payload)
                 while True:
                     event = await ws.receive_json()
                     events.append(event)
@@ -70,8 +105,8 @@ async def main() -> None:
                                     and transition.get("request_kind") == "VASD_SEM")
 
             stopped_after_semantic = False
-            for chunk in chunks:
-                if await send_audio(chunk) and args.stop_after_semantic:
+            for index, chunk in enumerate(chunks):
+                if await send_audio(chunk, frame_index=index) and args.stop_after_semantic:
                     stopped_after_semantic = True
                     break
             if not stopped_after_semantic:
@@ -102,6 +137,9 @@ async def main() -> None:
         "playback_active": args.playback_active,
         "sample_rate_hz": sample_rate_hz,
         "audio_chunks": len(chunks),
+        "video_colors": args.video_colors,
+        "video_frame_limit": args.video_frame_limit,
+        "sent_video_frames": sent_video_frames,
         "stopped_after_semantic": stopped_after_semantic,
         "event_types": [event.get("type") for event in events],
         "transitions": [event.get("transition") for event in events

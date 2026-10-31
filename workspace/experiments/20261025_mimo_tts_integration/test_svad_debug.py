@@ -8,6 +8,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
+import cv2
 import numpy as np
 from aiohttp import ClientSession
 from aiohttp.test_utils import TestServer
@@ -273,6 +274,10 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sem_probability_threshold", html)
         self.assertIn("retain_interrupted_context", html)
         self.assertIn("type:'playback.state',active", html)
+        self.assertIn('id="videoEnabled"', html)
+        self.assertIn('id="cameraPreview"', html)
+        self.assertIn("now-lastVideoFrameAt<1000", html)
+        self.assertIn("payload.video_frame=frame", html)
         self.assertIn('audioChunkMs', html)
         self.assertIn('now-lastFlushAt<target', html)
         self.assertIn("对话", html)
@@ -356,15 +361,23 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(configured["config"]["audio_chunk_ms"], 500)
             self.assertEqual(configured["config"]["sem_probability_threshold"], .8)
             audio_payloads = []
-            for amplitude in (10000, 12000, 14000):
+            for index, amplitude in enumerate((10000, 12000, 14000)):
                 pcm = base64.b64encode(
                     (np.ones(512, dtype="<i2") * amplitude).tobytes()
                 ).decode()
+                image = np.full((64, 96, 3), (index * 80, 255 - index * 80, 40),
+                                dtype=np.uint8)
+                ok, jpeg = cv2.imencode(".jpg", image)
+                self.assertTrue(ok)
                 audio_payloads.append({
                     "type": "audio",
                     "audio": pcm,
                     "format": "pcm16",
                     "sample_rate_hz": 16000,
+                    "video_frame": {
+                        "format": "jpeg",
+                        "data": base64.b64encode(jpeg.tobytes()).decode(),
+                    },
                 })
             for expected_state, payload in zip(("Listen", "Listen", "Silence"), audio_payloads):
                 await ws.send_json(payload)
@@ -385,6 +398,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(event["transition"]["semantic_margin"], expected_margin)
             started = await ws.receive_json()
             self.assertEqual(started["type"], "chat.started")
+            self.assertEqual(started["video_frame_count"], 3)
             delta1 = await ws.receive_json()
             delta2 = await ws.receive_json()
             done = await ws.receive_json()
@@ -399,6 +413,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                     "audio": payload["audio"],
                     "format": "pcm16",
                     "sample_rate_hz": 16000,
+                    "video_frame": payload["video_frame"],
                 }
                 for payload in audio_payloads
             ))

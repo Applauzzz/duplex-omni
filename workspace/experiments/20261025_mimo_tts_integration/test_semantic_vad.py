@@ -8,6 +8,9 @@ import unittest
 import wave
 from types import SimpleNamespace
 
+import cv2
+import numpy as np
+
 from semantic_vad import (
     BREAK_TOKEN,
     COMPLETE_TOKEN,
@@ -32,6 +35,8 @@ from semantic_vad import (
     audio_chunks_to_wav,
     choose_decode_token,
     extract_semantic_vad_config,
+    validate_video_frame,
+    video_chunks_to_jpeg_sequence,
 )
 
 
@@ -351,6 +356,48 @@ class AudioTests(unittest.TestCase):
             self.assertEqual(recording.getnframes(), 320)
 
 
+class VideoTests(unittest.TestCase):
+    @staticmethod
+    def frame(color: tuple[int, int, int]) -> dict[str, object]:
+        image = np.full((64, 96, 3), color, dtype=np.uint8)
+        ok, encoded = cv2.imencode(".jpg", image)
+        if not ok:
+            raise RuntimeError("JPEG fixture encoding failed")
+        return {
+            "format": "jpeg",
+            "data": base64.b64encode(encoded.tobytes()).decode(),
+        }
+
+    def test_video_frames_validate_and_form_jpeg_sequence_in_order(self):
+        chunks = [
+            {"video_frame": self.frame((0, 0, 255))},
+            {"video_frame": self.frame((0, 255, 0))},
+        ]
+        for item in chunks:
+            validate_video_frame(item)
+        video = video_chunks_to_jpeg_sequence(chunks)
+        self.assertIsNotNone(video)
+        decoded = []
+        for encoded in video.split(","):
+            image = cv2.imdecode(
+                np.frombuffer(base64.b64decode(encoded), dtype=np.uint8),
+                cv2.IMREAD_COLOR,
+            )
+            decoded.append(cv2.cvtColor(image, cv2.COLOR_BGR2RGB).mean(axis=(0, 1)))
+        self.assertEqual(len(decoded), 2)
+        self.assertGreater(decoded[0][0], decoded[0][1])
+        self.assertGreater(decoded[1][1], decoded[1][0])
+
+    def test_invalid_video_frame_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "valid JPEG"):
+            validate_video_frame({
+                "video_frame": {
+                    "format": "jpeg",
+                    "data": base64.b64encode(b"not-jpeg").decode(),
+                },
+            })
+
+
 class FakeResponse:
     def __init__(self, content):
         self.status = 200
@@ -478,6 +525,71 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             "sample_rate_hz": 16000,
         }
 
+    @staticmethod
+    def video_frame(color: tuple[int, int, int]) -> dict[str, object]:
+        image = np.full((64, 96, 3), color, dtype=np.uint8)
+        ok, encoded = cv2.imencode(".jpg", image)
+        if not ok:
+            raise RuntimeError("JPEG fixture encoding failed")
+        return {
+            "format": "jpeg",
+            "data": base64.b64encode(encoded.tobytes()).decode(),
+        }
+
+    async def test_video_follows_candidate_rejection_and_accepted_turn(self):
+        class ScriptedVAD:
+            def __init__(self):
+                self.values = iter((True, False, True, True, False))
+                self.last_active = False
+
+            def process_base64(self, *_args, **_kwargs):
+                active = next(self.values)
+                stopped = not active and self.last_active
+                self.last_active = active
+                return SimpleNamespace(
+                    is_speech=active,
+                    speech_active=active,
+                    speech_started=False,
+                    speech_stopped=stopped,
+                    speech_probability=1.0 if active else 0.0,
+                )
+
+        provider = ScriptedProvider(
+            breaks=[VASDDecision(False), VASDDecision(False), VASDDecision(True)],
+            completes=[VAEDDecision(True, probability=.95, margin=3.0)],
+        )
+        adapter = SemanticRealtimeAdapter(
+            SemanticVADConfig(min_speech_duration_ms=32, complete_confirmations=1),
+            provider,
+            vad=ScriptedVAD(),
+        )
+        rejected = self.audio()
+        rejected["video_frame"] = self.video_frame((0, 0, 255))
+        accepted_a = self.audio()
+        accepted_a["video_frame"] = self.video_frame((0, 255, 0))
+        accepted_b = self.audio()
+        accepted_b["video_frame"] = self.video_frame((255, 0, 0))
+        await adapter.process_append(
+            rejected, default_format="pcm16", default_sample_rate_hz=16000)
+        discarded, _ = await adapter.process_append(
+            self.audio(high=False), default_format="pcm16", default_sample_rate_hz=16000)
+        self.assertEqual(discarded.state, InputState.SILENCE)
+        admitted, commands = await adapter.process_append(
+            accepted_a, default_format="pcm16", default_sample_rate_hz=16000)
+        self.assertEqual(admitted.event, InputEvent.PREFILL)
+        self.assertNotIn("video_frame", commands[-1])
+        await adapter.process_append(
+            accepted_b, default_format="pcm16", default_sample_rate_hz=16000)
+        decoded, _ = await adapter.process_append(
+            self.audio(high=False), default_format="pcm16", default_sample_rate_hz=16000)
+        self.assertEqual(decoded.event, InputEvent.DECODE)
+        frames = [
+            item["video_frame"]
+            for item in decoded.decode_audio
+            if isinstance(item, dict) and "video_frame" in item
+        ]
+        self.assertEqual(frames, [accepted_a["video_frame"], accepted_b["video_frame"]])
+
     async def test_prefill_chunk_and_decode_command_order(self):
         class EndpointVAD:
             def __init__(self):
@@ -506,7 +618,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
         self.assertEqual(first.event, InputEvent.PREFILL)
         self.assertEqual([item["type"] for item in commands], [
-            "barge_in", "input_audio_buffer.append",
+            "input_audio_buffer.append",
         ])
         incremental, commands = await adapter.process_append(
             self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
@@ -769,6 +881,74 @@ class ChatProviderTests(unittest.IsolatedAsyncioTestCase):
         for message in user_messages:
             self.assertEqual(message["content"][0]["type"], "input_audio")
             self.assertIn("不要转写", message["content"][1]["text"])
+
+    async def test_chat_orders_video_before_audio_for_current_and_history_turns(self):
+        class Response:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            @property
+            def content(self):
+                async def stream():
+                    for line in (
+                        b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}\n',
+                        b'\n',
+                        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+                        b'\n',
+                        b'data: [DONE]\n',
+                        b'\n',
+                    ):
+                        yield line
+                return stream()
+
+        class Client:
+            def __init__(self):
+                self.payload = None
+
+            def post(self, _url, *, json, headers):
+                self.payload = json
+                return Response()
+
+        client = Client()
+        provider = MiMoChatProvider(client, "http://mimo")
+        audio = self._pcm_chunk()
+        audio_wav = base64.b64encode(audio_chunks_to_wav([audio])).decode()
+        deltas = [delta async for delta in provider.stream_reply(
+            [audio],
+            history=[{
+                "audio_wav": audio_wav,
+                "video_frames": "history-video",
+                "assistant": "上一轮回答",
+            }],
+            prompt="中文 Chat Prompt",
+            context={"request_id": "chat-video-test", "video_frames": "current-video"},
+        )]
+        self.assertEqual(deltas, ["ok"])
+        user_messages = [row for row in client.payload["messages"] if row["role"] == "user"]
+        self.assertEqual(len(user_messages), 2)
+        self.assertEqual(
+            [item["type"] for item in user_messages[0]["content"]],
+            ["video_url", "input_audio", "text"],
+        )
+        self.assertEqual(
+            [item["type"] for item in user_messages[1]["content"]],
+            ["video_url", "input_audio", "text"],
+        )
+        self.assertEqual(
+            user_messages[0]["content"][0]["video_url"]["url"],
+            "data:video/jpeg;base64,history-video",
+        )
+        self.assertEqual(
+            user_messages[1]["content"][0]["video_url"]["url"],
+            "data:video/jpeg;base64,current-video",
+        )
+        self.assertIn("结合视频内容", user_messages[0]["content"][2]["text"])
+        self.assertIn("结合视频内容", user_messages[1]["content"][2]["text"])
 
     @staticmethod
     def _pcm_chunk():
