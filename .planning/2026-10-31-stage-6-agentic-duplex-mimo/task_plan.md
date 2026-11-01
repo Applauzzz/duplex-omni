@@ -6,12 +6,12 @@ Integrate the existing VAD-gated audio/video MiMo plus streaming TTS service
 current browser frontend frozen and preserving the existing inference services.
 
 ## Next Step
-Migrate the isolated new-node deployment from the structured-envelope
-compatibility path to vLLM's native MiMo tool parser, then validate the full
-tool execution loop before exposing the browser agent host.
+Add an iChat GPT-4o reasoning tool to the native MiMo agent, validate tool
+selection policy and the server-only model call, then publish the child and
+parent revisions.
 
 ## Current Phase
-Phase 7: native MiMo tool parser migration
+Phase 8: delegated GPT-4o reasoning tool
 
 ## Phases
 
@@ -69,6 +69,14 @@ Phase 7: native MiMo tool parser migration
 - [x] Start isolated agent backend/browser services on the new compute node
 - **Status:** complete
 
+### Phase 8: Delegated GPT-4o Reasoning Tool
+- [x] Add a server-only iChat GPT-4o reasoning endpoint
+- [x] Register `consult_reasoning_model` as a standard Realtime SDK tool
+- [x] Make supported tool names explicit and reject unknown manifest tools
+- [x] Update tool-selection prompt and audio/video context requirements
+- [x] Run focused TypeScript and live API/tool validation
+- **Status:** complete
+
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
@@ -89,6 +97,7 @@ Phase 7: native MiMo tool parser migration
 | Use AudioWorklet PCM and scheduled AudioBuffer playback | Match the duplex service PCM contract without reintroducing WebRTC/OpenAI audio |
 | Use vLLM parser name `mimo` rather than the generic alias `qwen3_xml` | Current vLLM source registers `mimo` to the Qwen3 engine parser matching the checkpoint's native XML tool syntax |
 | Remove the compatibility Tool Router and envelope recovery | The new isolated MiMo service will expose standard OpenAI `tool_calls`, so a second model-routing protocol is unnecessary and caused stale/repeated tool selection |
+| Expose GPT-4o reasoning as `consult_reasoning_model` | RealtimeAgent cannot select a separate per-agent model; a standard Function Tool preserves MiMo as the realtime multimodal model while delegating complex text reasoning server-side |
 
 ## Errors Encountered
 | Error | Resolution |

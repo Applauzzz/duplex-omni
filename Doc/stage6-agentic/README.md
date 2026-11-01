@@ -81,6 +81,16 @@ updateSessionConfig 切换 instructions/tools；结果回传后 MiMo 在同一�
 tool message 回填并在同一轮继续生成。无 tools 时仍直接使用普通 streaming
 multimodal Chat。Tool Router、JSON envelope 和损坏输出 recovery 已移除。
 
+当前通用 Agent 暴露三个标准 Function Tools：
+
+- `search_web`：Serper 实时公开信息搜索。
+- `get_current_datetime`：北京时间日期和时间。
+- `consult_reasoning_model`：通过 server-only Next route 调用 iChat `gpt-4o`
+  处理复杂文本推理，再由 MiMo 组织最终口语回答。
+
+工具集合由 manifest 显式声明并由实现 registry 校验；未知工具在 Agent 配置加载时
+直接失败，不会静默暴露给 MiMo。
+
 ## 代码归属
 
 父仓库：

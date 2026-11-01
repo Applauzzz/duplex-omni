@@ -245,6 +245,28 @@ MiMo 8090 启用 `--enable-auto-tool-choice --tool-call-parser mimo`。有 tools
 语法解析为 `tool_calls`；Python 服务只做工具名、call id 和 JSON arguments 校验。
 没有 tools 时直接走普通 MiMo streaming Chat。
 
+### GPT-4o 推理工具
+
+复杂文本任务通过标准 Function Tool `consult_reasoning_model` 委托给后端
+iChat `gpt-4o`：
+
+    MiMo audio/video understanding
+      -> consult_reasoning_model({ task, context })
+      -> Next /api/tools/reasoning
+      -> iChat Chat Completions gpt-4o
+      -> tool output
+      -> MiMo final spoken answer
+
+该工具只用于多步骤规划、复杂方案比较、代码或技术分析和复杂逻辑推理。简单问答、
+简单计算和直接视觉问答由 MiMo 自己完成；实时事实使用 `search_web`；日期时间只使用
+`get_current_datetime`。GPT-4o 看不到原始音频或视频，因此 MiMo 必须在 `task` 或
+`context` 中提供完成任务所需的语音语义、视觉事实和必要历史。
+
+`ICHAT_API_KEY` 只存在于 Next server 进程环境。reasoning route 固定使用：
+
+    baseURL=http://ichat.woa.com/api/external
+    model=gpt-4o
+
 ## 7. 添加 Handoff
 
 Handoff 用于切换整个 Agent，而不是执行一次动作：

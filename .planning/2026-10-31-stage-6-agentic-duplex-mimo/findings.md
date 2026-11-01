@@ -14,6 +14,12 @@
   entry points, and live end-to-end verification has priority.
 
 ## Research Findings
+- The active host for this resumed session is `28.29.217.180`, not the previous
+  compute node `28.29.218.56`. Chrome secure-origin flags must match the host
+  actually serving the page.
+- The pinned SDK tool schema rejects a Zod field that is only `.optional()`.
+  Optional semantic context must be represented as required and `.nullable()`,
+  with `null` normalized to an empty server-side context.
 - Browser session `svad-de71908500f4` reached VASD_SEM, VAED and
   `agent_chat_started`, while vLLM completed its GPU requests with HTTP 200 and
   no engine error. The backend emitted neither a tool event nor `chat.done`.

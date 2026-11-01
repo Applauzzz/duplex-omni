@@ -7,6 +7,28 @@
 - **Started:** 2026-11-01
 
 ### Actions Taken
+- Began Phase 8 to expose iChat GPT-4o as a standard reasoning Function Tool.
+- Chose a server-only Next route using the existing process-local
+  `ICHAT_API_KEY`; credentials remain outside source and browser bundles.
+- Added `/api/tools/reasoning`, fixed to iChat Chat Completions model `gpt-4o`.
+- Added `consult_reasoning_model` to the Realtime SDK tool set with explicit
+  task/context arguments and audio/video visibility constraints.
+- Replaced hard-coded root tools with a manifest-driven supported-tool registry;
+  unknown manifest tool names now fail during Agent configuration loading.
+- Updated Agent instructions to separate datetime, current-information search,
+  simple MiMo answers, and complex GPT-4o reasoning.
+- TypeScript compile and two existing transport tests passed.
+- Live reasoning endpoint returned HTTP 200 with `model=gpt-4o`, a 360-token
+  response, and reported USD 0.0025725 cost. The token was process-local only.
+- Diagnosed `/agent` HTTP 500 on the current host: the SDK rejected
+  `context: z.string().optional()` in the reasoning tool schema. Changed it to
+  required nullable context and normalized null before the API request.
+- Confirmed the current public host is `28.29.217.180`; `/agent` now returns 200.
+- Preserved the historical MiMo 8090 on GPU 0-3. Started an isolated native
+  parser MiMo on GPU 4-7 at 8091 and Agent backend 8081 against it.
+- Verified 8091 auto tool parsing selects `consult_reasoning_model`; with the
+  actual Agent payload (`enable_thinking=false`, 1024 tokens), MiMo produced
+  complete JSON `task` and `context` arguments.
 - Investigated browser session `svad-de71908500f4`: VASD/VAED completed and
   Agent Chat started, but no tool/chat completion event reached the browser.
 - Confirmed MiMo had zero running/waiting requests and no error/abort; the stall
