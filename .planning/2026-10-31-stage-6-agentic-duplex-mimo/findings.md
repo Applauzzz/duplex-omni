@@ -14,6 +14,29 @@
   entry points, and live end-to-end verification has priority.
 
 ## Research Findings
+- Browser session `svad-de71908500f4` reached VASD_SEM, VAED and
+  `agent_chat_started`, while vLLM completed its GPU requests with HTTP 200 and
+  no engine error. The backend emitted neither a tool event nor `chat.done`.
+- Native streaming completion previously waited for the trailing SSE `[DONE]`
+  even after receiving a definitive `finish_reason`. The affected multimodal
+  request stopped making application progress at that boundary despite the
+  vLLM engine already being idle.
+- Treating a non-null `finish_reason` as the authoritative stream completion
+  boundary fixes the stall while retaining `[DONE]` compatibility. Native tool
+  output is already fully present before the `finish_reason=tool_calls` chunk.
+- A 120-second SDK tool-output timeout now prevents an unavailable browser tool
+  implementation from leaving a Chat turn pending indefinitely.
+- On the new compute node, all eight NVIDIA H20 GPUs were effectively idle at
+  inspection time (521 MiB used of 97871 MiB each). The likely externally
+  reachable address is `28.29.218.56`; final bind/reachability still needs a
+  live service check.
+- Current `vllm-src` registers both `mimo` and `qwen3_xml` to
+  `Qwen3EngineToolParser`. Use the model-specific public name `mimo` as directed.
+- The checkpoint chat template emits native XML tool calls in the form
+  `<tool_call><function=name><parameter=key>value</parameter></function></tool_call>`.
+- The activated `omni` environment does not complete a plain `import vllm`
+  promptly on this node. Service startup must pin an explicit validated runtime
+  import root rather than assuming the environment installation is usable.
 - Stage 5 video support is merged into synchronized `main`; the product payload
   is vLLM's JPEG frame sequence rather than short MP4.
 - Existing third-party engine dependencies are Git submodules, so a pinned

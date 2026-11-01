@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-import uuid
 
 from semantic_vad import _sse_data, build_chat_messages
 
@@ -20,28 +19,17 @@ or otherwise has no active request for the assistant, do not call any tool or ha
 and return exactly listening as the final content.
 Only after confirming active assistant-directed intent may you apply Agent instructions,
 use visual context, call tools, hand off, or answer the request."""
-TOOL_CALL_PATTERN = re.compile(
-    r"<tool_call>\s*<function=(?P<name>[A-Za-z0-9_]+)>"
-    r"(?P<body>.*?)</function>\s*</tool_call>",
-    re.DOTALL,
-)
-TOOL_PARAMETER_PATTERN = re.compile(
-    r"<parameter=(?P<name>[A-Za-z0-9_]+)>"
-    r"(?P<value>.*?)</parameter>",
-    re.DOTALL,
-)
-
-
 class AgenticMiMoChatProvider:
     """Pause MiMo tool calls while the Agents SDK executes tools and handoffs."""
 
     def __init__(self, client, mimo_url: str, *, model: str = "mimo-v2.6-flash",
-                 max_tool_rounds: int = 8, native_tool_calls: bool = False) -> None:
+                 max_tool_rounds: int = 8, native_tool_calls: bool = True) -> None:
+        if not native_tool_calls:
+            raise ValueError("Agentic MiMo requires native vLLM tool calls")
         self.client = client
         self.mimo_url = mimo_url.rstrip("/")
         self.model = model
         self.max_tool_rounds = max_tool_rounds
-        self.native_tool_calls = native_tool_calls
 
     async def stream_reply(self, audio_chunks, *, history, prompt, context):
         agent_config = context.get("agent_config")
@@ -60,21 +48,6 @@ class AgenticMiMoChatProvider:
             audio_chunks, history=history, prompt=prompt, context=context)
         request_id = str(context.get("request_id") or "agent-chat")
         tools = list(tools)
-        if len(tools) > 1:
-            selected_name = await self._route_tool(
-                messages,
-                tools,
-                f"{request_id}-route",
-            )
-            tools = [
-                item for item in tools
-                if item.get("function", {}).get("name") == selected_name
-            ]
-            LOG.info(
-                "MiMo agent tool route request_id=%s selected=%s",
-                request_id,
-                selected_name or "none",
-            )
         empty_final_retried = False
         for round_index in range(self.max_tool_rounds):
             messages[0] = {
@@ -91,12 +64,18 @@ class AgenticMiMoChatProvider:
                 text = await self._direct_completion(
                     messages, f"{request_id}-agent-{round_index}")
                 tool_calls = []
-            elif self.native_tool_calls:
-                text, tool_calls = await self._native_completion(
-                    messages, list(tools), f"{request_id}-agent-{round_index}")
             else:
-                text, tool_calls = await self._prompt_completion(
+                text, tool_calls, finish_reason = await self._native_completion(
                     messages, list(tools), f"{request_id}-agent-{round_index}")
+                LOG.info(
+                    "MiMo agent round completed request_id=%s round=%s finish=%s "
+                    "text_chars=%s tools=%s",
+                    request_id,
+                    round_index,
+                    finish_reason,
+                    len(text),
+                    [call.get("function", {}).get("name") for call in tool_calls],
+                )
             if not tool_calls:
                 if not text.strip():
                     if empty_final_retried:
@@ -121,99 +100,39 @@ class AgenticMiMoChatProvider:
             messages.append({"role": "assistant", "content": text or None,
                              "tool_calls": tool_calls})
             for call in tool_calls:
-                output = await tool_handler(call)
+                self._validate_tool_call(call, tools)
+                LOG.info(
+                    "MiMo agent waiting for tool request_id=%s call_id=%s name=%s",
+                    request_id,
+                    call["id"],
+                    call["function"]["name"],
+                )
+                try:
+                    output = await asyncio.wait_for(tool_handler(call), timeout=120)
+                except TimeoutError as error:
+                    raise RuntimeError(
+                        f"Agent tool timed out: {call['function']['name']}") from error
                 if not isinstance(output, str):
                     raise RuntimeError("Agent tool output must be a string")
+                LOG.info(
+                    "MiMo agent tool completed request_id=%s call_id=%s name=%s",
+                    request_id,
+                    call["id"],
+                    call["function"]["name"],
+                )
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],
                     "content": output,
                 })
-            # One external action per user turn. The result is enough context for
-            # the next round, which must produce the final response directly.
-            tools = []
             refreshed = context.get("agent_config")
             if isinstance(refreshed, Mapping):
                 instructions = refreshed.get("instructions", instructions)
+                refreshed_tools = refreshed.get("tools", tools)
+                if (isinstance(refreshed_tools, Sequence)
+                        and not isinstance(refreshed_tools, (str, bytes))):
+                    tools = list(refreshed_tools)
         raise RuntimeError("MiMo agent exceeded max_tool_rounds")
-
-    async def _route_tool(self, messages, tools, request_id):
-        names = [
-            item.get("function", {}).get("name")
-            for item in tools if isinstance(item, Mapping)
-        ]
-        names = [name for name in names if isinstance(name, str) and name]
-        if not names:
-            return None
-        descriptions = [
-            {
-                "name": item.get("function", {}).get("name"),
-                "description": item.get("function", {}).get("description", ""),
-            }
-            for item in tools if isinstance(item, Mapping)
-        ]
-        route_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Select at most one tool for the current user turn. "
-                    "Use only the current user audio/video, not previous tool calls. "
-                    "Choose none when the current request can be answered without a tool. "
-                    "Date/time questions select get_current_datetime only. "
-                    "News, weather, latest or changing public information selects "
-                    "search_web only. Available tools: "
-                    + json.dumps(descriptions, ensure_ascii=False)
-                ),
-            },
-            messages[-1],
-        ]
-        payload = {
-            "model": self.model,
-            "messages": route_messages,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "duplex_tool_route",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "tool": {
-                                "type": "string",
-                                "enum": ["none", *names],
-                            },
-                        },
-                        "required": ["tool"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "max_tokens": 32,
-            "temperature": 0.0,
-            "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-        async with self.client.post(
-            self.mimo_url + "/v1/chat/completions", json=payload,
-            headers={"X-Request-Id": request_id},
-        ) as response:
-            if response.status != 200:
-                body = await response.read()
-                raise RuntimeError(
-                    f"MiMo Agent Route HTTP {response.status}: {body[:200]!r}")
-            event = await response.json()
-        try:
-            content = event["choices"][0]["message"]["content"]
-            selected = json.loads(content)["tool"]
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-            raise RuntimeError(
-                f"MiMo Agent returned an invalid tool route: {str(locals().get('content'))[:300]!r}"
-            ) from error
-        if selected == "none":
-            return None
-        if selected not in names:
-            raise RuntimeError(f"MiMo Agent routed to unknown tool: {selected!r}")
-        return selected
 
     async def _direct_completion(self, messages, request_id):
         payload = {
@@ -254,6 +173,7 @@ class AgenticMiMoChatProvider:
                     reason = choice.get("finish_reason")
                     if reason is not None:
                         finish_reason = reason
+                        return text
             raise RuntimeError("MiMo Agent Direct disconnected before DONE")
 
     async def _native_completion(self, messages, tools, request_id):
@@ -282,7 +202,7 @@ class AgenticMiMoChatProvider:
                 if data == "[DONE]":
                     if finish_reason is None:
                         raise RuntimeError("MiMo Agent ended without finish_reason")
-                    return text, [calls[index] for index in sorted(calls)]
+                    return text, [calls[index] for index in sorted(calls)], finish_reason
                 event = json.loads(data)
                 if not isinstance(event, dict) or event.get("error"):
                     raise RuntimeError("MiMo Agent returned an error event")
@@ -296,234 +216,35 @@ class AgenticMiMoChatProvider:
                     reason = choice.get("finish_reason")
                     if reason is not None:
                         finish_reason = reason
+                        return (
+                            text,
+                            [calls[index] for index in sorted(calls)],
+                            finish_reason,
+                        )
             raise RuntimeError("MiMo Agent disconnected before DONE")
 
-    async def _prompt_completion(self, messages, tools, request_id):
-        allowed_kinds = ["tool_call", "final"] if tools else ["final"]
-        protocol = {
-            "available_tools": tools,
-            "rules": [
-                (
-                    "Highest priority: if the user is not intentionally interacting "
-                    "with the assistant, do not call a tool and return final content "
-                    "exactly listening."
-                ),
-                "Return kind=tool_call when a tool or handoff is needed.",
-                "For tool_call, name must exactly match an available function name.",
-                "For tool_call, arguments must be a JSON object encoded as a string.",
-                "Return kind=final only when no tool call is needed.",
-                "Put the user-facing answer only in content.",
-            ],
-        }
-        request_messages = [dict(item) for item in messages]
-        request_messages[0] = {
-            "role": "system",
-            "content": (
-                str(request_messages[0]["content"])
-                + "\n\nAgent tool protocol:\n"
-                + json.dumps(protocol, ensure_ascii=False)
-            ),
-        }
-        payload = {
-            "model": self.model,
-            "messages": request_messages,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "duplex_agent_turn",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "kind": {
-                                "type": "string",
-                                "enum": allowed_kinds,
-                            },
-                            "name": {"type": "string"},
-                            "arguments": {"type": "string"},
-                            "content": {"type": "string", "minLength": 1},
-                        },
-                        "required": ["kind", "name", "arguments", "content"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "max_tokens": 512,
-            "temperature": 0.0,
-            "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-        async with self.client.post(
-            self.mimo_url + "/v1/chat/completions", json=payload,
-            headers={"X-Request-Id": request_id},
-        ) as response:
-            if response.status != 200:
-                body = await response.read()
-                raise RuntimeError(
-                    f"MiMo Agent Envelope HTTP {response.status}: {body[:200]!r}")
-            event = await response.json()
-        try:
-            content = event["choices"][0]["message"]["content"]
-            result = json.loads(content)
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-            raw = locals().get("content")
-            result = self._recover_tool_envelope(str(raw), tools)
-            if result is None:
-                raise RuntimeError(
-                    f"MiMo Agent returned an invalid tool envelope: {str(raw)[:500]!r}"
-                ) from error
-            LOG.warning(
-                "Recovered malformed MiMo tool envelope request_id=%s tool=%s",
-                request_id,
-                result.get("name"),
-            )
-        if result.get("kind") == "final":
-            final = result.get("content")
-            if not isinstance(final, str):
-                raise RuntimeError("MiMo Agent final content must be a string")
-            return final, []
-        if result.get("kind") != "tool_call":
-            raise RuntimeError("MiMo Agent envelope kind is invalid")
-        name = result.get("name")
-        arguments = result.get("arguments")
+
+    @staticmethod
+    def _validate_tool_call(call, tools):
         allowed = {
             item.get("function", {}).get("name")
             for item in tools if isinstance(item, Mapping)
         }
+        function = call.get("function") if isinstance(call, Mapping) else None
+        name = function.get("name") if isinstance(function, Mapping) else None
+        arguments = function.get("arguments") if isinstance(function, Mapping) else None
+        if not isinstance(call.get("id"), str) or not call["id"]:
+            raise RuntimeError("MiMo Agent tool call is missing an id")
         if not isinstance(name, str) or name not in allowed:
             raise RuntimeError(f"MiMo Agent requested unknown tool: {name!r}")
         if not isinstance(arguments, str):
             raise RuntimeError("MiMo Agent tool arguments must be a JSON string")
         try:
-            parsed_arguments = json.loads(
-                arguments.strip().rstrip("。；;，,"))
+            parsed = json.loads(arguments)
         except json.JSONDecodeError as error:
             raise RuntimeError("MiMo Agent tool arguments are invalid JSON") from error
-        if not isinstance(parsed_arguments, dict):
+        if not isinstance(parsed, dict):
             raise RuntimeError("MiMo Agent tool arguments must encode an object")
-        call = {
-            "id": "call-" + uuid.uuid4().hex[:16],
-            "type": "function",
-            "function": {
-                "name": name,
-                "arguments": json.dumps(parsed_arguments, ensure_ascii=False),
-            },
-        }
-        return "", [call]
-
-    @staticmethod
-    def _recover_tool_envelope(content, tools):
-        allowed = {
-            item.get("function", {}).get("name")
-            for item in tools if isinstance(item, Mapping)
-        }
-        match = TOOL_CALL_PATTERN.search(content)
-        if match is not None and match.group("name") in allowed:
-            arguments = {}
-            for parameter in TOOL_PARAMETER_PATTERN.finditer(match.group("body")):
-                name = parameter.group("name")
-                value = parameter.group("value").strip()
-                if name == "num":
-                    try:
-                        arguments[name] = int(value)
-                        continue
-                    except ValueError:
-                        pass
-                arguments[name] = value
-            return {
-                "kind": "tool_call",
-                "name": match.group("name"),
-                "arguments": json.dumps(arguments, ensure_ascii=False),
-                "content": "",
-            }
-        return AgenticMiMoChatProvider._recover_json_prefix_tool(
-            content, allowed)
-
-    @staticmethod
-    def _recover_json_prefix_tool(content, allowed):
-        name_match = re.search(
-            r'"name"\s*:\s*"(?P<name>[A-Za-z0-9_]+)"',
-            content,
-        )
-        if name_match is None or name_match.group("name") not in allowed:
-            return None
-        marker = re.search(r'"arguments"\s*:\s*"', content)
-        if marker is None:
-            return None
-        source = content[marker.end():]
-        decoded = []
-        depth = 0
-        started = False
-        in_string = False
-        escaped = False
-        index = 0
-        escape_map = {
-            '"': '"',
-            "\\": "\\",
-            "/": "/",
-            "b": "\b",
-            "f": "\f",
-            "n": "\n",
-            "r": "\r",
-            "t": "\t",
-        }
-        while index < len(source):
-            char = source[index]
-            if char == "\\" and index + 1 < len(source):
-                next_char = source[index + 1]
-                if next_char == "u" and index + 5 < len(source):
-                    try:
-                        char = chr(int(source[index + 2:index + 6], 16))
-                        index += 6
-                    except ValueError:
-                        return None
-                elif next_char in escape_map:
-                    char = escape_map[next_char]
-                    index += 2
-                else:
-                    return None
-            else:
-                index += 1
-            if not started:
-                if char.isspace():
-                    continue
-                if char != "{":
-                    return None
-                started = True
-                depth = 1
-                decoded.append(char)
-                continue
-            decoded.append(char)
-            if escaped:
-                escaped = False
-                continue
-            if in_string and char == "\\":
-                escaped = True
-                continue
-            if char == '"':
-                in_string = not in_string
-            elif not in_string:
-                if char == "{":
-                    depth += 1
-                elif char == "}":
-                    depth -= 1
-                    if depth == 0:
-                        break
-        if not started or depth != 0:
-            return None
-        candidate = "".join(decoded)
-        try:
-            arguments = json.loads(candidate)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(arguments, dict):
-            return None
-        return {
-            "kind": "tool_call",
-            "name": name_match.group("name"),
-            "arguments": json.dumps(arguments, ensure_ascii=False),
-            "content": "",
-        }
 
     @staticmethod
     def _merge_tool_call(calls, item):

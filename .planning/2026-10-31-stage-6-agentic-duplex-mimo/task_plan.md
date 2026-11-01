@@ -6,11 +6,12 @@ Integrate the existing VAD-gated audio/video MiMo plus streaming TTS service
 current browser frontend frozen and preserving the existing inference services.
 
 ## Next Step
-Push child commit b6dfb9b and the parent feature branch when GitHub HTTPS
-reachability is restored. Keep the current server services running.
+Migrate the isolated new-node deployment from the structured-envelope
+compatibility path to vLLM's native MiMo tool parser, then validate the full
+tool execution loop before exposing the browser agent host.
 
 ## Current Phase
-Phase 6: runnable browser agent host
+Phase 7: native MiMo tool parser migration
 
 ## Phases
 
@@ -59,6 +60,15 @@ Phase 6: runnable browser agent host
 - [x] Start an isolated backend and Next.js host for user validation
 - **Status:** in_progress
 
+### Phase 7: Native MiMo Tool Parser Migration
+- [x] Confirm the checkpoint tool syntax and current source parser registration
+- [x] Remove Tool Router, JSON envelope and malformed-output recovery paths
+- [x] Make native OpenAI `tool_calls` mandatory in the agent provider
+- [x] Launch MiMo with `--enable-auto-tool-choice --tool-call-parser mimo`
+- [x] Run at most five focused native-parser tests, prioritizing a live tool turn
+- [x] Start isolated agent backend/browser services on the new compute node
+- **Status:** complete
+
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
@@ -77,6 +87,8 @@ Phase 6: runnable browser agent host
 | Add a separate /duplex-mimo route | Keep the previous frontend frozen while delivering a usable agent host |
 | Bind video capture to outgoing audio flushes | Preserve the existing VAD-bound video lifecycle with no video state machine |
 | Use AudioWorklet PCM and scheduled AudioBuffer playback | Match the duplex service PCM contract without reintroducing WebRTC/OpenAI audio |
+| Use vLLM parser name `mimo` rather than the generic alias `qwen3_xml` | Current vLLM source registers `mimo` to the Qwen3 engine parser matching the checkpoint's native XML tool syntax |
+| Remove the compatibility Tool Router and envelope recovery | The new isolated MiMo service will expose standard OpenAI `tool_calls`, so a second model-routing protocol is unnecessary and caused stale/repeated tool selection |
 
 ## Errors Encountered
 | Error | Resolution |

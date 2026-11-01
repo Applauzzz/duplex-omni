@@ -70,16 +70,16 @@ MiMo tool-call loop 在 tool call 处暂停。RealtimeSession 根据当前
 RealtimeAgent 执行普通 function tool，或执行 SDK handoff 并调用
 updateSessionConfig 切换 instructions/tools；结果回传后 MiMo 在同一用户轮继续生成。
 
-structured envelope 的 arguments 字段是 JSON object 的字符串表示，服务端会再次
-解析并验证。handoff 后如果新 agent 没有 tools，schema 只允许 final，避免模型
-重复调用已经从当前工具集中移除的旧 handoff。
+当前 MiMo 8090 使用 vLLM 原生工具解析：
 
-当前共享 MiMo 8090 启动时没有配置 vLLM 的 auto tool choice 和 tool-call
-parser，因此 OpenAI native tools 请求会返回 HTTP 400。有 tools/handoffs 时，
-AgenticMiMoChatProvider 使用受 JSON schema 约束的 tool envelope，让 MiMo 输出
-tool_call 或 final，再转换为 SDK function_call 事件。无 tools 时直接使用普通
-streaming multimodal Chat。native tool-call 流式解析代码保留；后续 MiMo 服务
-配置 parser 后可显式启用。
+    --reasoning-parser mimo
+    --enable-auto-tool-choice
+    --tool-call-parser mimo
+
+有 tools/handoffs 时，AgenticMiMoChatProvider 将完整 OpenAI tools 数组交给 MiMo，
+消费 vLLM 返回的流式 `tool_calls`，再交给 RealtimeSession 执行。tool output 以标准
+tool message 回填并在同一轮继续生成。无 tools 时仍直接使用普通 streaming
+multimodal Chat。Tool Router、JSON envelope 和损坏输出 recovery 已移除。
 
 ## 代码归属
 
@@ -152,14 +152,13 @@ Stage 6 首轮没有重启或替换已有 8080/8090 服务。
 - 为正式 agent 调用方接入麦克风 PCM、视频帧和 TTS PCM 播放；不修改冻结的
   SVAD 页面。当前已通过程序化 PCM transport 验证。
 - 验证用户 fork 远端包含当前 submodule 基准提交，并分别提交/推送子模块与父仓库。
-- 后续滚动 MiMo 服务时选择并验证适合 MiMo 的 vLLM tool-call parser，再切换
-  native tool-call 模式；当前 structured envelope 是已验证的兼容路径。
+- 在真实浏览器中验收麦克风、摄像头、TTS 和业务工具凭据。
 
 ## Phase 6 浏览器 Agent Host
 
 新增独立路由，不修改原状态机页面工作流。正式用户入口：
 
-    http://28.29.217.180:8080/agent
+    http://28.29.218.56:8080/agent
 
 内部 Next.js 和 agent backend 分别运行在 3000、8081，但企业网关不允许
 Mac 直接访问 3000。8080 提供同源代理：

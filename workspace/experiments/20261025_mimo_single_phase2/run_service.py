@@ -61,7 +61,9 @@ def main():
             "--served-model-name", "mimo-v2.6-flash", "--tensor-parallel-size", "4",
             "--enable-expert-parallel", "--trust-remote-code",
             "--gpu-memory-utilization", "0.90", "--max-model-len", "32768",
-            "--reasoning-parser", "mimo", "--host", "127.0.0.1", "--port", str(args.port),
+            "--reasoning-parser", "mimo", "--enable-auto-tool-choice",
+            "--tool-call-parser", "mimo",
+            "--host", "127.0.0.1", "--port", str(args.port),
         ]
     env = os.environ.copy()
     runtime_source = run / "runtime"

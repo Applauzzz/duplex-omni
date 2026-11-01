@@ -157,27 +157,12 @@
 
   SP U0 A0 SP U1 A1
 
-  ## Tool Router 的 Prompt
-
-  Tool Router 是独立旁路请求，位置也在：
-
-  workspace/experiments/20261025_mimo_tts_integration/agent_runtime.py:140
-
-  它不使用完整 Chat Prompt，只发送：
-
-  system:
-    只根据当前用户轮选择 none / search_web / get_current_datetime
-
-  user:
-    当前轮音频/视频
-
-  它不会写入主对话历史。
-
-  因此当前共有：
+  当前共有：
 
   - vasd_sem_prompt：Judge 阶段，有/无。
   - vaed_prompt：语义端点，已/未。
   - chat_prompt：主回答与 listening。
   - Agent instructions：Agent、视觉和工具策略。
   - AGENT_INTERACTION_POLICY：服务端统一的最高优先级 listening/tool 限制。
-  - Tool Router prompt：独立工具选择请求。
+  工具定义由 checkpoint chat template 作为 tools system block 渲染，不再有独立
+  Tool Router prompt。MiMo 在主回答请求中直接决定是否调用工具。

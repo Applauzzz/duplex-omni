@@ -527,12 +527,24 @@ async def websocket(request):
             history.append(history_entry)
             del history[:-4]
             await send({"type": "chat.done", "turn_id": turn_id, "text": text})
+            LOG.info(
+                "agent_chat_done session=%s turn=%s text_chars=%s tts=%s",
+                session_id,
+                turn_id,
+                len(text),
+                tts_task is not None,
+            )
             chat_text_done = True
             if isinstance(active_response, dict) and active_response.get("turn_id") == turn_id:
                 active_response["text"] = text
                 active_response["text_done"] = True
             if tts_task is not None:
                 await tts_task
+                LOG.info(
+                    "agent_tts_done session=%s turn=%s",
+                    session_id,
+                    turn_id,
+                )
         except asyncio.CancelledError:
             if tts_task is not None and not tts_task.done():
                 tts_task.cancel()
@@ -830,7 +842,8 @@ async def context(app):
         if not app["agentic"]:
             app["chat_provider"] = MiMoChatProvider(client, app["mimo_url"])
         else:
-            app["chat_provider"] = AgenticMiMoChatProvider(client, app["mimo_url"])
+            app["chat_provider"] = AgenticMiMoChatProvider(
+                client, app["mimo_url"], native_tool_calls=True)
         app["tts_provider"] = WeChatStreamingTTSProvider(client, app["tts_url"])
         yield
 

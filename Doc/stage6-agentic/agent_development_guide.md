@@ -240,9 +240,10 @@ get_current_datetime，并按北京时间回答。
       -> MiMo continues the same turn
       -> final answer -> TTS
 
-当前共享 MiMo 8090 没有启用 vLLM native tool-call parser。有 tools 时使用 JSON
-schema tool envelope，arguments 是 JSON object 编码后的字符串，Python 服务会
-再次解析和校验。没有 tools 时直接走普通 MiMo streaming Chat。
+MiMo 8090 启用 `--enable-auto-tool-choice --tool-call-parser mimo`。有 tools 时
+完整工具数组随标准 OpenAI Chat 请求进入 MiMo，vLLM 将 checkpoint 的 XML 工具
+语法解析为 `tool_calls`；Python 服务只做工具名、call id 和 JSON arguments 校验。
+没有 tools 时直接走普通 MiMo streaming Chat。
 
 ## 7. 添加 Handoff
 
@@ -460,7 +461,7 @@ arguments 对象，但 envelope 随后被单引号、think 标签或重复拒答
 
 ### 麦克风不可用
 
-Chrome 安全 origin 必须是实际页面的 http://28.29.217.180:8080。
+Chrome 安全 origin 必须是实际页面的 http://28.29.218.56:8080。
 
 ### Agent 页面 500
 
@@ -474,8 +475,8 @@ Chrome 安全 origin 必须是实际页面的 http://28.29.217.180:8080。
 
 ## 13. 当前限制
 
-- MiMo 8090 未配置 vLLM native tool-call parser。
-- 有 tools 时使用 structured envelope；无 tools 时走普通 multimodal Chat。
+- MiMo 8090 依赖 vLLM `mimo` tool parser；启动参数缺失时 tools 请求会失败。
+- 新节点未默认注入 `ICHAT_API_KEY`，`search_web` 需要在 Next 进程环境中单独配置。
 - SDK user audio history 当前没有语音转写文本。
 - 摄像头是低频 JPEG 上下文，不是模型侧连续视频 KV prefill。
 - 真实业务工具的鉴权、approval、超时、重试和审计需要按业务实现。

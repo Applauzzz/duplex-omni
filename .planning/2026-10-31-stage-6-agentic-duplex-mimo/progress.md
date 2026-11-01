@@ -1,5 +1,81 @@
 # Progress Log
 
+## Session: 2026-11-01
+
+### Current Status
+- **Phase:** 7 - Native MiMo tool parser migration
+- **Started:** 2026-11-01
+
+### Actions Taken
+- Investigated browser session `svad-de71908500f4`: VASD/VAED completed and
+  Agent Chat started, but no tool/chat completion event reached the browser.
+- Confirmed MiMo had zero running/waiting requests and no error/abort; the stall
+  was in application-side native SSE completion handling.
+- Updated direct/native streaming completion to return immediately on a
+  non-null `finish_reason` instead of requiring a trailing `[DONE]` sentinel.
+- Added native round, tool wait/completion, `chat.done`, and TTS completion logs.
+- Added a 120-second timeout while waiting for SDK tool output.
+- Restarted only the owned 8081 agent backend; MiMo 8090, public 8080 and Next
+  3000 remained running.
+- Real speech probe using “今天是几号，现在几点？” passed through VASD/VAED,
+  native `get_current_datetime`, tool output, final Chat and `chat.done`.
+- The same probe through `8080/agent-ws` with TTS enabled completed
+  `agent.function_call`, `chat.done`, PCM audio streaming and `tts.done`.
+- User web search reached the SDK tool correctly but Next returned HTTP 503
+  because `ICHAT_API_KEY` was absent from the new-node process environment.
+- Restarted only the owned Next 3000 process with the previously supplied
+  limited iChat token injected through hidden terminal input. The token was not
+  written to repository files, planning records, or service logs.
+- Same-origin `POST /api/tools/web-search` returned HTTP 200 with one real
+  result; the probe consumed one credit and reported USD 0.0003 cost.
+- Recovered the pinned Stage 6 plan without replacing historical records.
+- Preserved local user changes in `Doc/stage6-agentic/agent_prompt.md`,
+  `Doc/stage6-agentic/agent_runtime.md`, and `wx_tts_ref.py`.
+- Confirmed the new node has eight idle H20 GPUs and no known inherited service
+  state has been assumed.
+- Confirmed current source registers parser name `mimo` and the checkpoint uses
+  the matching native XML tool-call syntax.
+- Began replacing Router/envelope compatibility with native vLLM tool calls.
+- Removed Tool Router, structured JSON envelope, XML recovery and malformed
+  JSON-prefix recovery from `AgenticMiMoChatProvider`.
+- Made native tool calls mandatory and preserved direct multimodal completion
+  for agents with no tools.
+- Added `--enable-auto-tool-choice --tool-call-parser mimo` to the MiMo launcher.
+- Started MiMo on GPU 0-3 at `127.0.0.1:8090`; launch manifest and logs are in
+  `workspace/logs/20261101T_native_mimo_agent_081500/`.
+- Direct live Chat validation returned `get_current_datetime` as a standard
+  OpenAI `tool_calls` item and completed a final answer after tool output.
+- Streaming live validation returned `delta.tool_calls` followed by
+  `finish_reason=tool_calls` and `[DONE]`, matching the provider parser.
+- Started agent backend `127.0.0.1:8081`, Next host `127.0.0.1:3000`, and
+  same-origin public entry `http://28.29.218.56:8080/agent`.
+- Confirmed local page, backend, and public page all return HTTP 200.
+- `ICHAT_API_KEY` is not set on the new node; datetime works, while web search
+  requires injecting the key into the Next process environment.
+
+### Test Results
+| Test | Result |
+|------|--------|
+| Native provider focused suite (5 tests) | PASS |
+| Python compile for provider/server/launcher | PASS |
+| Live native multi-tool selection | PASS: selected `get_current_datetime` |
+| Live tool-output continuation | PASS |
+| Agent WebSocket function-call round trip | PASS |
+| Public agent page | PASS: HTTP 200 |
+| Native finish-reason boundary regression | PASS in focused 5-test suite |
+| Real speech direct to 8081 after stall fix | PASS |
+| Real speech through 8080 proxy with TTS | PASS |
+
+### Errors
+| Error | Resolution |
+|-------|------------|
+| Planning resolver script could not execute because its `/bin/sh` interpreter was denied | Used the explicitly pinned plan directory directly and did not fall back to another plan |
+| `ss` is unavailable on the new node | Defer port ownership checks to socket binds/process inspection before startup |
+| Plain `import vllm` did not complete in the activated environment | Validate and pin an explicit source/runtime PYTHONPATH before service launch |
+| First native MiMo launch wrapper had an unmatched shell quote | No process started; retry with a fixed timestamp path and simpler command quoting |
+| First WebSocket test selector used the wrong class name | Corrected to `DebugServiceTests` |
+| Sandbox denied the aiohttp test's localhost bind | Re-ran the same single test with scoped local-bind permission; passed |
+
 ## Session: 2026-10-31
 
 ### Current Status
