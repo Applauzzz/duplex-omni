@@ -1216,11 +1216,14 @@ class MiMoChatProvider:
             raise RuntimeError("MiMo Chat disconnected before DONE")
 
 
+CHAT_HISTORY_TURNS = 10
+
+
 def build_chat_messages(audio_chunks, *, history, prompt, context):
     """Build the shared multimodal conversation payload for plain and agentic chat."""
     system = _prompt_from_context({"chat_prompt": prompt}, "chat_prompt", DEFAULT_CHAT_PROMPT)
     messages: list[dict[str, object]] = [{"role": "system", "content": system}]
-    for turn in history[-4:]:
+    for turn in history[-CHAT_HISTORY_TURNS:]:
         audio_data = turn.get("audio_wav") if isinstance(turn, Mapping) else None
         video_data = turn.get("video_frames") if isinstance(turn, Mapping) else None
         assistant = turn.get("assistant") if isinstance(turn, Mapping) else None

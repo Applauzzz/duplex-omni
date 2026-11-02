@@ -1,5 +1,175 @@
 # Findings & Decisions
 
+## 2026-11-02: M2 Disconnected Browser Status Failure
+- M2 notify did not catch closed-transport send failures unlike EchoBridge.
+  Real07:42UTC traces show ClientConnectionResetError in manifest status
+  notification and finally cleanup; native reports generic protocol error.
+- M2 owner conflict gate did not revalidate owning echo binding. Reconcile
+  only orphan owner records; never steal a live matching owner.
+- Four selected M2 tests pass incl real WS manifest with disconnected browser
+  callback and live-owner conflict/orphan release. No real Mac retry accepted
+  yet; sanitized reject code needed if another protocol failure persists.
+
+## 2026-11-01: Ten-Turn Conversation Window
+- Original build_chat_messages and service normal/interrupted history each
+  enforced four turns. Unified constant now10; request contains up to ten
+  historical user multimodal/assistant pairs plus current user input.
+- max_tool_rounds=8 is a separate per-request tool continuation budget, not
+  conversation memory. This budget remains unchanged.
+- Fresh WebSocket rolling-window and message-builder tests prove retention.
+  Cross-turn tool traces and history after reconnect remain out of scope.
+
+## 2026-11-01: Actual Mac Timer Behavior
+- Real browser-triggered30s timer has authenticated succeeded/running receipt
+  and same-ID timer.finished event, persisted by server. This supersedes the
+  previous M2-offline observation for that session.
+- Timer lives in native app tasks SQLite, not Apple Clock. LocalToolsLabModel
+  refresh sweeps deadlines and lists remaining_seconds; default notifications
+  off, explicit permission and reconciliation required for system banner/sound.
+- Mapping owner uses native device owner, same as local countdown UI snapshot.
+  Server suppressed ACK deliberately means no proactive speech, not failure.
+  No direct inspection of user's Mac screen or notification settings performed.
+
+## 2026-11-01: M2 Bridge HTTP 502 Diagnosis
+- Current application logs show native binding discovery200 at15:48:19 and
+  15:48:36, but no observed m2/bridge request or server502/traceback.
+  Access logs alone cannot exclude an in-flight WebSocket request.
+- Delivered M2Protocol.swift independently hardcodes the historical
+  ws://29.213.201.220:8080/api/tools/m2/bridge twice (connection and parsing).
+  M2Bridge.run uses config.bridgeURL, not discovery HTTP base.
+- Existing patch_mac_m2_endpoints.py replaces both literals and preserves
+  originals with exclusive backups; H20-only patch/rebuild is insufficient.
+  Old Mac endpoint/build is the leading hypothesis, not a confirmed root cause.
+- User must patch their Mac copy, rebuild, quit old App and reopen the new
+  dist app. Preserve SSH tunnel, explicit browser grant and all device data.
+  No real tool invocation or server restart is needed for this diagnosis.
+
+## 2026-11-01: Remembered Browser Grant
+- Grant is independent of Mac Token and per-session binding; private SQLite
+  stores SHA256 browser-token hash, exact origin/device/auth digest, 30-day
+  sliding expiry, explicitly granted M2 owner/scopes and capture hold.
+- HTTP/WS entry must preserve original Host/Origin/Cookie and Set-Cookie;
+  otherwise localhost browser trust fails behind8080 ->8081 proxy.
+- Restores fresh sessions, never pending tools/history. Reject active owner
+  conflicts; frontend bounded retry permits old refresh cleanup. Revocation
+  deletes grant and cancels/revokes active bridge state, not just UI storage.
+- Five grant cases and four service cases passed; tsc passed. Official MDN
+  lookup returned no usable result; no external verification claimed.
+
+## 2026-11-01: Agent Capture Startup Version Skew
+- Frontend now sends agent.capture.ready at connect; current source handles
+  ready/hold/resume even with M2 policy disabled. Live echo-only backend was
+  not reloaded and rejects ready, closing the entire session.
+- Traceback line text differs from the old running code because disk source
+  has changed. Reload application8080/8081, not model/SSH/Next services;
+  retain device identity while requiring fresh per-session browser consent.
+
+## 2026-11-01: Selected M2 Tool Contract
+- Delivered Mac0.10 executes selected tools through M2 v2 and requires
+  workspace/context mapping, independent scopes and authorization_revision.
+  Mac settings confirm existing formal context; server cannot invent it.
+- Reminder and contact list results use data.items, not reminders/contacts.
+  Object and revision must be checked together; route IDs from place_search.
+- Mac M2 config still hardcodes historical29.213.201.220 WS. Prepared
+  user-copy patch script with backup; sibling original source remains unchanged.
+- Timer event ACK supports suppressed: durable acceptance without active speech.
+  Selected implementation enables receive/UI only, no speak permission.
+- Schema library jsonschema already installed in omni; no environment install.
+
+## 2026-11-01: Native Revision Contract Mismatch
+- Native H20AutoConnect.swift strictly validates revision against
+  `^[0-9a-f]{32}\.[0-9]+$`. Bare UUID server output explains automatic
+  discovery rejection before bridge establishment.
+- Corrected server revision format without relaxing native validation.
+  Existing five protocol cases now exercise waiting/authorized discovery and
+  guarded WS. No upstream lookup required: local delivered contract is source.
+
+## 2026-11-01: Automatic Echo Connection Clarification
+- Mac App automatic mode waits for explicit browser authorization; it can stay
+  enabled during pairing and does not start the browser Agent session.
+- App `copyH20Code` writes the code without visible success feedback.
+  `automaticChanged(.connected)` and code expiry call `clearPairingCode`,
+  which clears clipboard only if it still equals the copied code.
+- User clipboard counts 15 then 32 support a successful latest copy, not a
+  confirmed valid binding. Earlier copy failure cause remains unproven.
+
+## 2026-11-01: SSH Versus WebSocket Test Paths
+- cmd/wss sends plain echo frames on8081 and does not tunnel SSH.
+- cmd/sshd_test config uses native SSH on443, not HTTPS/WSS. A permitted443
+  port alone does not establish raw SSH protocol permission or Mac routing.
+- Current interface28.29.218.56 differs from old test client28.29.211.154.
+ 22 listener exists on current interface;443 has no listener, and historical
+ sshd binary/config fails validation due to missing privilege-separation user.
+ User Mac connectivity and authentication must be checked separately.
+
+## 2026-11-01: Echo Adapter Implementation Findings
+- First implementation uses native v1 demo_echo, not M2/v2. The historical
+  native manifest/ack/discovery contract was inspected directly; capability
+  discovery advertises no persistent browser grants.
+- SDK updateAgent refreshes both its internal executable tool map and transport
+  configuration. Mutating agent.tools alone or manually passing Zod schemas is
+  insufficient. Use a connection-local agent/context to avoid shared mutation.
+- Real SDK listeners are installed by connect, not constructor. SDK acceptance
+  uses real RealtimeSession with simulated transport; service acceptance uses
+  actual aiohttp sockets with protocol peer/mock model. Neither proves a unified
+  live browser/MiMo/Mac session.
+- Generation session.update frames can precede tool.call during configuration;
+  native peers/tests must consume these control messages rather than treat every
+  frame as an invocation. Device credentials stay server/native-only.
+- Backend-generated failure/unknown outputs also need authoritative verification,
+  otherwise SDK default exception text would be rejected and close the session.
+- Browser Chromium/Playwright assets were not found in checked local paths.
+  No visual or real-Mac acceptance claim; existing model/Next processes preserved.
+
+## 2026-11-01: Chinese Tool Use Reference Scope
+- User requests a maintained Chinese chain/tool-use reference. Cover all 28
+  cumulative Mac catalog tools, the three existing Stage6 SDK tools, and the
+  separately discovered server-side song extension; distinguish their status.
+- Catalog descriptions explicitly define note tools as a Mac local test
+  database, not Apple Notes or arbitrary user files. Read-only document tools
+  can still change local reading context.
+- The first full descriptor dump exceeded output limits. Use compact structured
+  input-schema/description projection and targeted song source reads to finish
+  the inventory without assuming missing details.
+
+## 2026-11-01: Agent Tool Integration Recovery
+- Task-pinned resolver selected the existing plan; host selectors are unset.
+  The shared pointer was not changed and no session transcripts were consulted.
+- Parent starts on `feature/stage6-agentic`, with no tracked diff and only the
+  preserved untracked historical `wx_tts_ref.py`. All three submodules are clean,
+  including `third_party/openai-realtime-agents` on `feature/stage6-duplex-mimo`.
+- The plan head/progress stop at the October30 SVAD work, but tracked Stage6
+  records and current source describe the subsequent SDK transport, native
+  MiMo tool parser, search/time/reasoning tools and independent browser host.
+  Historical envelope/recovery descriptions in the guide are superseded by
+  `agent_runtime.md` and must not guide new implementation.
+- Current session scope: inspect the external tool catalogs/bridge read-only,
+  assess compatibility, establish an additive feature branch, and record the
+  next implementation slice. Do not import the old inference stack or run its
+  legacy deployment/validation scripts.
+- Parent history confirms committed Stage6 integration (`f041034`), native
+  parser (`fbc1d63`) and reasoning delegation (`57f4abf`); framework baseline
+  `86469fd` is locally synchronized with its remote-tracking feature branch.
+  No network remote refresh is claimed.
+- Structured JSON inspection found cumulative catalogs of 9/12/26/28 tools.
+  They include echo/context, notes/timers, weather/places/routes, Apple
+  reminders/calendar, documents, contacts and FaceTime. Catalog availability
+  does not prove runtime policy, grant, Mac negotiation or real execution.
+- `fc_m2_runtime.py` explicitly declares no local executor. `invoke(session,
+  current, call_id, name, arguments)` persists a fenced invocation before
+  sending it to the authenticated native Mac peer. It depends on the old core's
+  browser/device binding, owner, authorization revision and generation.
+- `fc_m2_routes.py` exposes capabilities, consent, device discovery, native
+  bridge, event and receipt archival routes, not a generic execute endpoint.
+  `/api/tools/m2/results` is archive-only and cannot be used to execute a tool.
+- Reuse descriptors and Mac v2 wire contracts; adapt identity/lifecycle
+  explicitly. Do not import `fc_llm.py` or old capture/conversation loops.
+  FaceTime requires real browser capture-pause ACK; timers require a separate
+  unsolicited-event design and are not covered by ordinary tool round trips.
+- OpenAI Docs skill was read; official search and page fetch returned no usable
+  content. This assessment relies on inspected local pinned source, not claims
+  about the latest SDK or official documentation.
+
 ## 2026-10-29: Parallel Semantic Admission And Interrupt Retention Recovery
 - The selected plan remains `2026-10-25-mimo-single-omni-duplex`; no plan was
   initialized or overwritten. The current branch is `feature/SVAD` and already

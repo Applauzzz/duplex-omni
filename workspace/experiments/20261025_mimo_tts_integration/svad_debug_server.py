@@ -12,11 +12,15 @@ from pathlib import Path
 import time
 import uuid
 
-from aiohttp import ClientSession, WSMsgType, web
+from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
 
 from agent_runtime import AgenticMiMoChatProvider
+from mac_tools import EchoBridge, MacToolError, TOOL as MAC_ECHO_TOOL
+from browser_trust import BrowserTrust, browser_origin
+from mac_m2 import M2Bridge, FUNCTIONS as MAC_M2_FUNCTIONS, WRITES as MAC_M2_WRITES, CALLS as MAC_M2_CALLS
 from backend import client_timeout
 from semantic_vad import (
+    CHAT_HISTORY_TURNS,
     DEFAULT_CHAT_PROMPT,
     DEFAULT_VAED_PROMPT,
     DEFAULT_VASD_SEM_PROMPT,
@@ -211,12 +215,19 @@ async def agent_frontend_proxy(request):
 
 
 async def agent_websocket_proxy(request):
+    if request.headers.get("Origin"):
+        try:
+            browser_origin(request)
+        except MacToolError:
+            return web.json_response({"error": "browser_origin_rejected"}, status=403)
     browser = web.WebSocketResponse(max_msg_size=2 * 1024 * 1024, heartbeat=20)
     await browser.prepare(request)
     async with request.app["client"].ws_connect(
         request.app["agent_backend_url"] + "/ws",
         max_msg_size=2 * 1024 * 1024,
         heartbeat=20,
+        headers={k: request.headers[k] for k in ("Host", "Origin", "Cookie")
+                 if k in request.headers},
     ) as backend:
         async def browser_to_backend():
             async for message in browser:
@@ -248,7 +259,62 @@ async def agent_websocket_proxy(request):
     return browser
 
 
+async def mac_http_proxy(request):
+    async with request.app["client"].request(
+        request.method, request.app["agent_backend_url"] + request.path_qs,
+        data=await request.read(),
+        headers={k: v for k, v in request.headers.items()
+                 if k.lower() not in {"content-length", "connection"}},
+        allow_redirects=False,
+    ) as response:
+        return web.Response(body=await response.read(), status=response.status,
+                            headers={k: v for k, v in response.headers.items()
+                                     if k.lower() in {"content-type", "cache-control",
+                                                      "vary", "retry-after", "set-cookie"}})
+
+
+async def mac_websocket_proxy(request):
+    require_origin = request.headers.get("Origin")
+    if require_origin is not None:
+        return web.json_response({"error": "native_client_required"}, status=403)
+    try:
+        upstream = await request.app["client"].ws_connect(
+            request.app["agent_backend_url"] + request.path_qs,
+            headers={"Authorization": request.headers.get("Authorization", "")},
+            max_msg_size=32768,
+        )
+    except WSServerHandshakeError as error:
+        return web.json_response({"error": "mac_bridge_connection_rejected"},
+                                 status=error.status)
+    async with upstream:
+        native = web.WebSocketResponse(max_msg_size=32768, heartbeat=20)
+        await native.prepare(request)
+
+        async def relay(source, target):
+            async for message in source:
+                if message.type == WSMsgType.TEXT:
+                    await target.send_str(message.data)
+                else:
+                    break
+        tasks = [asyncio.create_task(relay(native, upstream)),
+                 asyncio.create_task(relay(upstream, native))]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await native.close(code=upstream.close_code or 1000)
+        return native
+
+
 async def websocket(request):
+    origin = None
+    if request.headers.get("Origin"):
+        try:
+            origin = browser_origin(request)
+        except MacToolError:
+            return web.json_response({"error": "browser_origin_rejected"}, status=403)
     ws = web.WebSocketResponse(max_msg_size=2 * 1024 * 1024, heartbeat=20)
     await ws.prepare(request)
     session_id = "svad-" + uuid.uuid4().hex[:12]
@@ -260,6 +326,10 @@ async def websocket(request):
     history: list[dict[str, str]] = []
     agent_config: dict[str, object] = {}
     pending_tool_calls: dict[str, asyncio.Future[str]] = {}
+    pending_tool_names: dict[str, str] = {}
+    pending_tool_arguments: dict[str, str] = {}
+    mac_tasks: set[asyncio.Task] = set()
+    mac_requested: set[str] = set()
     chat_task = None
     chat_turn_id = None
     chat_tts_enabled = False
@@ -279,12 +349,33 @@ async def websocket(request):
     send_lock = asyncio.Lock()
 
     async def send(payload):
+        if payload.get("type") in {"agent.mac.status", "agent.mac.m2.status"} and agent_config:
+            tools = [item for item in agent_config.get("tools", [])
+                     if item.get("function", {}).get("name") not in {*MAC_M2_FUNCTIONS, "demo_echo"}]
+            if mac_bridge.ready(mac_binding):
+                tools.append(MAC_ECHO_TOOL)
+            tools.extend(MAC_M2_FUNCTIONS[name] for name in mac_m2.available(m2_binding))
+            agent_config["tools"] = tools
         async with send_lock:
             await ws.send_json(payload)
+
+    mac_bridge = request.app["mac_bridge"]
+    mac_binding = mac_bridge.open_session(session_id, send)
+    mac_m2 = request.app["mac_m2"]
+    m2_binding = mac_m2.open_session(session_id, send)
+    browser_trust = request.app["browser_trust"]
+    mac_binding.browser_origin = origin
+    m2_approvals = {}
+    capture_acks = {}
 
     async def cancel_chat(reason):
         nonlocal chat_task, chat_turn_id, chat_tts_enabled, chat_text_done, active_response
         task = chat_task
+        await mac_bridge.advance(mac_binding)
+        await mac_m2.advance(m2_binding)
+        for future in [*m2_approvals.values(), *capture_acks.values()]:
+            if not future.done():
+                future.cancel()
         turn_id = chat_turn_id
         active = task is not None and not task.done()
         retained_entry = None
@@ -318,9 +409,14 @@ async def websocket(request):
             if not future.done():
                 future.cancel()
         pending_tool_calls.clear()
+        pending_tool_names.clear()
+        pending_tool_arguments.clear()
+        mac_requested.clear()
+        for mac_task in tuple(mac_tasks):
+            mac_task.cancel()
         if retained_entry is not None:
             history.append(retained_entry)
-            del history[:-4]
+            del history[:-CHAT_HISTORY_TURNS]
             retained = True
         active_response = None
         if turn_id is not None:
@@ -347,6 +443,8 @@ async def websocket(request):
                 raise RuntimeError("MiMo agent tool call requires a function")
             future = asyncio.get_running_loop().create_future()
             pending_tool_calls[call_id] = future
+            pending_tool_names[call_id] = function.get("name")
+            pending_tool_arguments[call_id] = function.get("arguments", "{}")
             await send({
                 "type": "agent.function_call",
                 "turn_id": turn_id,
@@ -366,6 +464,8 @@ async def websocket(request):
                 return await future
             finally:
                 pending_tool_calls.pop(call_id, None)
+                pending_tool_names.pop(call_id, None)
+                pending_tool_arguments.pop(call_id, None)
 
         chunker = IncrementalTextChunker(
             min_chars=response_settings["tts_min_chars"],
@@ -525,7 +625,7 @@ async def websocket(request):
             if video_frames is not None:
                 history_entry["video_frames"] = video_frames
             history.append(history_entry)
-            del history[:-4]
+            del history[:-CHAT_HISTORY_TURNS]
             await send({"type": "chat.done", "turn_id": turn_id, "text": text})
             LOG.info(
                 "agent_chat_done session=%s turn=%s text_chars=%s tts=%s",
@@ -579,6 +679,13 @@ async def websocket(request):
         )
         chat_task.add_done_callback(
             lambda _task: asyncio.create_task(maybe_start_pending()))
+
+    async def forget_browser():
+        await cancel_chat("browser_authorization_revoked")
+        await mac_bridge.revoke(mac_binding)
+        await mac_m2.revoke(m2_binding)
+
+    mac_binding.forget_browser = forget_browser
 
     def update_prompts(payload):
         for key in prompts:
@@ -701,6 +808,162 @@ async def websocket(request):
                 update_prompts(payload)
                 await send({"type": "prompts.updated", "prompts": dict(prompts)})
                 continue
+            if event_type == "agent.mac.status":
+                if origin and not mac_binding.device_id:
+                    try:
+                        await browser_trust.restore(request, mac_binding, m2_binding)
+                    except MacToolError as error:
+                        await send({"type": "agent.mac.error", "message": str(error)})
+                await mac_bridge.notify(mac_binding)
+                await mac_m2.notify(m2_binding)
+                continue
+            if event_type == "agent.mac.m2.options":
+                try:
+                    await mac_m2.options(m2_binding, mac_binding)
+                except MacToolError as error:
+                    await send({"type": "agent.mac.error", "message": str(error)})
+                continue
+            if event_type == "agent.mac.m2.authorize":
+                try:
+                    await mac_m2.authorize(m2_binding, mac_binding,
+                                           payload.get("scope"), payload.get("confirmed"))
+                    await browser_trust.save(mac_binding)
+                except MacToolError as error:
+                    await send({"type": "agent.mac.error", "message": str(error)})
+                continue
+            if event_type == "agent.mac.m2.revoke":
+                await cancel_chat("m2_revoked")
+                await mac_m2.revoke(m2_binding)
+                await browser_trust.save(mac_binding)
+                continue
+            if event_type == "agent.mac.m2.confirm":
+                future = m2_approvals.get(payload.get("call_id"))
+                if future and not future.done():
+                    future.set_result(payload.get("approved") is True)
+                continue
+            if event_type == "agent.capture.ready":
+                m2_binding.capture_ready = payload.get("supported") is True
+                await mac_m2.notify(m2_binding)
+                continue
+            if event_type == "agent.capture.paused":
+                future = capture_acks.get(payload.get("request_id"))
+                if future and not future.done():
+                    future.set_result(payload.get("stopped") is True)
+                continue
+            if event_type == "agent.capture.resume":
+                m2_binding.capture_paused = False
+                await browser_trust.save(mac_binding)
+                await mac_m2.notify(m2_binding)
+                continue
+            if event_type == "agent.capture.hold":
+                m2_binding.capture_paused = True
+                await browser_trust.save(mac_binding)
+                await mac_m2.notify(m2_binding)
+                continue
+            if event_type == "agent.mac.m2.invoke":
+                call_id, name = payload.get("call_id"), payload.get("name")
+                if (name not in MAC_M2_FUNCTIONS
+                        or pending_tool_names.get(call_id) != name
+                        or call_id not in pending_tool_calls
+                        or payload.get("arguments") != json.loads(
+                            pending_tool_arguments.get(call_id, "{}"))):
+                    await send({"type": "agent.mac.result", "call_id": call_id,
+                                "error": "mac_call_not_pending"})
+                    continue
+                if call_id in mac_requested:
+                    continue
+                mac_requested.add(call_id)
+
+                async def invoke_m2(call_id, name, arguments):
+                    generation = m2_binding.generation
+                    try:
+                        approved = name not in MAC_M2_WRITES
+                        if not approved:
+                            future = asyncio.get_running_loop().create_future()
+                            m2_approvals[call_id] = future
+                            await send({"type": "agent.mac.m2.confirmation", "call_id": call_id,
+                                        "name": name, "arguments": arguments})
+                            approved = await asyncio.wait_for(future, 60)
+                        if not approved:
+                            output = json.dumps({"status": "cancelled", "summary": "User declined",
+                                                 "data": None, "error": {"code": "user_declined",
+                                                 "message": "User declined", "retryable": False}})
+                            m2_binding.outputs[call_id] = (generation, output)
+                        else:
+                            if name in MAC_M2_CALLS:
+                                request_id = uuid.uuid4().hex
+                                m2_binding.capture_paused = True
+                                await browser_trust.save(mac_binding)
+                                future = asyncio.get_running_loop().create_future()
+                                capture_acks[request_id] = future
+                                await send({"type": "agent.capture.pause", "request_id": request_id})
+                                if not await asyncio.wait_for(future, 10):
+                                    raise MacToolError("m2_capture_pause_failed")
+                                if m2_binding.generation != generation:
+                                    return
+                                m2_binding.capture_paused = True
+                                await mac_m2.notify(m2_binding)
+                            if m2_binding.generation != generation:
+                                return
+                            output = await mac_m2.invoke_tool(
+                                m2_binding, call_id, name, arguments, confirmed=approved)
+                        await send({"type": "agent.mac.result", "call_id": call_id, "output": output})
+                    except (MacToolError, asyncio.TimeoutError) as error:
+                        if not m2_binding.closed and m2_binding.generation == generation:
+                            code = str(error) or "m2_confirmation_timeout"
+                            output = json.dumps({"status": "failed", "summary": code, "data": None,
+                                                 "error": {"code": code, "message": code,
+                                                           "retryable": False}})
+                            m2_binding.outputs[call_id] = (generation, output)
+                            await send({"type": "agent.mac.result", "call_id": call_id, "output": output})
+                    finally:
+                        m2_approvals.pop(call_id, None)
+                        if name in MAC_M2_CALLS and "request_id" in locals():
+                            capture_acks.pop(request_id, None)
+                task = asyncio.create_task(invoke_m2(call_id, name, payload["arguments"]))
+                mac_tasks.add(task)
+                task.add_done_callback(mac_tasks.discard)
+                continue
+            if event_type == "agent.mac.bind":
+                try:
+                    await mac_bridge.bind(
+                        mac_binding, payload.get("pairing_code"), payload.get("confirmed"))
+                except MacToolError as error:
+                    await send({"type": "agent.mac.error", "message": str(error)})
+                continue
+            if event_type == "agent.mac.revoke":
+                await browser_trust.revoke(mac_binding)
+                await cancel_chat("mac_authorization_revoked")
+                await mac_bridge.revoke(mac_binding)
+                await mac_m2.revoke(m2_binding)
+                continue
+            if event_type == "agent.mac.invoke":
+                call_id = payload.get("call_id")
+                if (not isinstance(call_id, str)
+                        or pending_tool_names.get(call_id) != "demo_echo"
+                        or call_id not in pending_tool_calls
+                        or payload.get("arguments") != json.loads(
+                            pending_tool_arguments.get(call_id, "{}"))):
+                    await send({"type": "agent.mac.result", "call_id": call_id,
+                                "error": "mac_call_not_pending"})
+                    continue
+                if call_id in mac_requested:
+                    continue
+                mac_requested.add(call_id)
+
+                async def invoke_mac(call_id, arguments):
+                    try:
+                        output = await mac_bridge.invoke(mac_binding, call_id, arguments)
+                        await send({"type": "agent.mac.result", "call_id": call_id,
+                                    "output": output})
+                    except (MacToolError, OSError) as error:
+                        await send({"type": "agent.mac.result", "call_id": call_id,
+                                    "error": str(error) if isinstance(error, MacToolError)
+                                    else "mac_audit_unavailable"})
+                task = asyncio.create_task(invoke_mac(call_id, payload.get("arguments")))
+                mac_tasks.add(task)
+                task.add_done_callback(mac_tasks.discard)
+                continue
             if event_type == "agent.session.update":
                 instructions = payload.get("instructions")
                 tools = payload.get("tools", [])
@@ -708,6 +971,15 @@ async def websocket(request):
                     raise ValueError("agent.session.update requires instructions")
                 if not isinstance(tools, list):
                     raise ValueError("agent.session.update tools must be an array")
+                if any(not isinstance(item, dict)
+                       or not isinstance(item.get("function"), dict) for item in tools):
+                    raise ValueError("agent.session.update requires function tools")
+                tools = [
+                    item for item in tools
+                    if not isinstance(item, dict)
+                    or item.get("function", {}).get("name") not in {*MAC_M2_FUNCTIONS, "demo_echo"}
+                ] + ([MAC_ECHO_TOOL] if mac_bridge.ready(mac_binding) else []) + [
+                    MAC_M2_FUNCTIONS[name] for name in mac_m2.available(m2_binding)]
                 agent_config.clear()
                 agent_config.update({"instructions": instructions, "tools": tools})
                 LOG.info(
@@ -728,6 +1000,12 @@ async def websocket(request):
                     raise ValueError(f"Unknown agent tool call: {call_id!r}")
                 if not isinstance(output, str):
                     raise ValueError("agent tool output must be a string")
+                if (pending_tool_names.get(call_id) == "demo_echo"
+                        and not mac_bridge.verified_output(mac_binding, call_id, output)):
+                    raise ValueError("Unverified Mac tool output")
+                if (pending_tool_names.get(call_id) in MAC_M2_FUNCTIONS
+                        and not mac_m2.verified_output(m2_binding, call_id, output)):
+                    raise ValueError("Unverified Mac M2 tool output")
                 future.set_result(output)
                 continue
             if event_type == "response.cancel":
@@ -751,6 +1029,8 @@ async def websocket(request):
                 continue
             if event_type != "audio":
                 raise ValueError(f"Unknown event: {event_type!r}")
+            if m2_binding.capture_paused:
+                continue
             if adapter is None:
                 raise ValueError("Configure the session before sending audio")
             sequence += 1
@@ -821,6 +1101,11 @@ async def websocket(request):
         if not ws.closed:
             await ws.send_json({"type": "error", "message": str(error)[:500]})
     finally:
+        await mac_bridge.close_session(mac_binding)
+        await mac_m2.close_session(m2_binding)
+        for task in mac_tasks:
+            task.cancel()
+        await asyncio.gather(*mac_tasks, return_exceptions=True)
         if adapter is not None:
             adapter.close()
         if chat_task is not None and not chat_task.done():
@@ -856,12 +1141,18 @@ def create_app(
     agentic=False,
     agent_frontend_url="http://127.0.0.1:3000",
     agent_backend_url="http://127.0.0.1:8081",
+    mac_auth_file=None,
+    mac_audit_file=None,
+    mac_m2_policy_file=None,
 ):
     app = web.Application(client_max_size=2 * 1024 * 1024)
     app["mimo_url"] = mimo_url.rstrip("/")
     app["tts_url"] = tts_url.rstrip("/")
     app["config_path"] = Path(config_path)
     app["agentic"] = bool(agentic)
+    app["mac_bridge"] = EchoBridge(mac_auth_file, mac_audit_file)
+    app["mac_m2"] = M2Bridge(app["mac_bridge"], mac_m2_policy_file)
+    app["browser_trust"] = BrowserTrust(app["mac_bridge"], app["mac_m2"])
     app["agent_frontend_url"] = agent_frontend_url.rstrip("/")
     app["agent_backend_url"] = agent_backend_url.rstrip("/")
     app["adapter_factory"] = SemanticRealtimeAdapter
@@ -875,6 +1166,18 @@ def create_app(
     app.router.add_route("*", "/agent", agent_frontend_proxy)
     app.router.add_route("*", "/_next/{tail:.*}", agent_frontend_proxy)
     app.router.add_route("*", "/duplex_pcm_capture.js", agent_frontend_proxy)
+    if agentic:
+        app["mac_bridge"].routes(app)
+        app["mac_m2"].routes(app)
+        app["browser_trust"].routes(app)
+    else:
+        app.router.add_route("*", "/api/tools/capabilities", mac_http_proxy)
+        app.router.add_route("*", "/api/tools/pairing", mac_http_proxy)
+        app.router.add_route("*", "/api/tools/device/binding", mac_http_proxy)
+        app.router.add_get("/api/tools/bridge", mac_websocket_proxy)
+        app.router.add_get("/api/tools/m2/bridge", mac_websocket_proxy)
+        app.router.add_route("*", "/api/tools/m2/{tail:.*}", mac_http_proxy)
+        app.router.add_route("*", "/api/tools/browser/{tail:.*}", mac_http_proxy)
     app.router.add_route("*", "/api/tools/{tail:.*}", agent_frontend_proxy)
     app.router.add_get("/agent-ws", agent_websocket_proxy)
     return app
@@ -889,6 +1192,9 @@ def main():
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--agentic", action="store_true",
                         help="Enable the OpenAI Agents SDK bridge protocol")
+    parser.add_argument("--mac-auth-file", type=Path)
+    parser.add_argument("--mac-audit-file", type=Path)
+    parser.add_argument("--mac-m2-policy-file", type=Path)
     parser.add_argument("--agent-frontend-url", default="http://127.0.0.1:3000")
     parser.add_argument("--agent-backend-url", default="http://127.0.0.1:8081")
     args = parser.parse_args()
@@ -899,6 +1205,9 @@ def main():
         tts_url=args.tts_url,
         config_path=args.config,
         agentic=args.agentic,
+        mac_auth_file=args.mac_auth_file,
+        mac_audit_file=args.mac_audit_file,
+        mac_m2_policy_file=args.mac_m2_policy_file,
         agent_frontend_url=args.agent_frontend_url,
         agent_backend_url=args.agent_backend_url,
     ), host=args.host, port=args.port,

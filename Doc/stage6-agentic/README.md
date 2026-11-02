@@ -6,10 +6,14 @@
 
 | 文件 | 内容 |
 |------|------|
+| [tool_use_zh.md](tool_use_zh.md) | 持续维护的中文部署/调用链、全部已盘点工具用法、授权与接入状态 |
 | [agent_development_guide.md](agent_development_guide.md) | 当前架构、Tool/Handoff 开发、音视频、协议、部署、测试和排障手册 |
+| [mac_tools_integration_20261101.md](mac_tools_integration_20261101.md) | 现有 Mac 工具可集成性、桥接边界、新分支与首个验收任务 |
 
 本 README 保留阶段设计和验证记录。实际开发与运维优先阅读
 agent_development_guide.md。
+Mac 工具链路和完整 Tool Use 清单优先阅读 tool_use_zh.md；旧段落的空工具、
+structured envelope 等说明是历史记录，不能覆盖当前 native parser 实现。
 
 ## 目标
 

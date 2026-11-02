@@ -2,6 +2,10 @@
 
 更新时间：2026-10-31。
 
+2026-11-01 中文链路与全部工具使用入口：
+[tool_use_zh.md](tool_use_zh.md)。本文旧 structured envelope/默认空工具描述为
+历史记录；当前使用 native MiMo parser 和已实现的三个 SDK 工具，Mac 工具待接入。
+
 ## 1. 当前能力与入口
 
 Duplex MiMo Agent 由三部分组成：

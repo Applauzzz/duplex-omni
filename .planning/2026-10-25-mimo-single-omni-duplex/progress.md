@@ -1,5 +1,652 @@
 # Progress Log
 
+## 2026-11-02: Publish Mac Tool Branch Checkpoint
+- User requests push to current branch. Parent and framework both
+  feature/stage6-mac-tools. Scope includes selected bridge/SDK/UI/contracts,
+  browser trust, ten-turn window, disconnect repairs, Chinese docs/plans and
+  existing user svad_config changes (buffer1024, incomplete timeout300,
+  revised interrupted-answer wording). Preserve historical wx_tts_ref.py.
+- Credential-pattern scan found no matches in scoped sources/docs; parent
+  and framework diff --check pass. Fresh M2 tests4/4 passed1.156s;
+  tsc --noEmit --incremental false passed. No broad suite or real tool invoked.
+- First remote fetch with github_env alone failed GitHub443 connection;
+  retry with env.sh plus github_env. No commit/push completed yet.
+- Retry fetch succeeded for both repositories. Framework commit b5e2f14
+  pushed to origin/feature/stage6-mac-tools with upstream, no force.
+  Parent checkpoint stages24 files including framework gitlink; private files,
+  raw logs and historical wx_tts_ref.py excluded. Parent push follows.
+
+## 2026-11-02: Persistent Binding Conflict And Native Protocol Error
+- User still sees m2_binding_conflict after quitting Chrome, then native
+  bridge_protocol_error. Live07:42 logs confirm M2 notify writing to closed
+  browser raises ClientConnectionResetError. Do not assume only duplicate tabs.
+- Scoped changes: M2 authorize releases only orphan owners absent/mismatched
+  in echo registry; live owners still conflict. M2 notify handles disconnected
+  send like echo notify. Log sanitized rejection code (no arguments/tokens).
+- Initial three focused tests passed0.922s. Added disconnected-browser native
+  manifest regression. One patch context failed without changes; corrected.
+  Changes not deployed yet; old resident traceback line text reflects disk
+  skew and is not evidence the new orphan patch caused the protocol error.
+- Four selected M2 tests passed1.212s. Verified owned supervisor2501853
+  stopped via approved SIGINT; old PTY4746 exited0. Waited30s for port release.
+- New launcher PTY63807, exclusive20261102T074703Z_mac_echo_2fc23d3d:
+  agent2515262/8081 entry2515264/8080. Original runtime/private/M2 policy
+  preserved; MiMo/TTS/SSH/Next not restarted. Read-only activation probe
+  exited0: health mimo/tts=true12.2ms, exact mapping,
+  waiting_scope_authorization. git diff --check passed.
+- User repeated protocol error before reload finished, then requested continue.
+  Application reload now complete; real native retry after manual browser
+  connection/consent remains pending. Do not claim all protocol causes resolved.
+
+## 2026-11-02: Full Prompt And Tool Discovery Explanation
+- Read current default config, browser manifest/instructions, transport,
+  Python generation loop and authoritative Mac availability filtering.
+- Added prompt_snapshot_20261102.md with complete default assembled system
+  message, user-message instruction, request structure and dynamic tool flow.
+  Distinguish source reconstruction from actual live-session capture.
+- No runtime code, policy or services changed. Tools use separate descriptors,
+  Mac system permission is still execution-time checked. Relative-date prompt
+  has no automatic current-date injection; noted existing limitation only.
+- OpenAI Docs skill read; official search/page open returned no usable content.
+  Explanation grounded in local code; no latest-SDK documentation claim.
+
+## 2026-11-01: Expand Conversation History To Ten Turns
+- User requests ten rounds of context. Existing shared payload builder and
+  normal/interrupted service history independently truncate to four turns.
+- Scope before edits: shared CHAT_HISTORY_TURNS=10 used by both layers,
+  focused WebSocket rolling-window test plus interruption/payload regressions;
+  reload only owned application8080/8081 preserving models/private identity.
+- Keep current tool-loop behavior: tool messages/results exist within a turn;
+  cross-turn history stores multimodal user input and final assistant reply,
+  not the full intermediate tool trace. No transcript persistence extension.
+- Four focused tests passed1.284s under env.sh + omni with experiment-only
+  PYTHONPATH: service12-turn rolling window, interrupted history, shared10-turn
+  payload and multimodal ordering. Existing aiohttp warnings unchanged.
+- Verified supervisor2486927 and children2487105/2487107; approved SIGINT,
+  old PTY29702 exited0. New launcher PTY42085 preserves runtime/private/M2
+  policy and exclusively creates a new run. Model/TTS/SSH/Next retained.
+- First restart PTY42085 failed at preflight bind errno98 before creating a
+  run or child. pgrep confirms no remaining app/supervisor; wait for socket
+  release then retry, preserving failure evidence. Startup not yet accepted.
+- Retry after30s started PTY4746, exclusive run
+  20261101T161236Z_mac_echo_18bd3dc2, agent2502015/8081 entry2502017/8080.
+  Read-only activation probe exited0, health mimo/tts=true11.7ms, M2 actual
+  mapping correct; browser scope waiting until user manually reconnects.
+  git diff --check and residual4-turn scan pass. No fresh GPU conversation
+  or real Mac tool was dispatched for this configuration change.
+
+## 2026-11-01: Contacts System Permission Required
+- User supplied permission_required result. Current live log shows repeated
+  contacts_search at15:58:31,15:59:17 and16:02:19UTC.
+- Native AppleContactsReader.search checks CNContactStore .authorized only;
+  tool execution never requests system permission. Explicit UI button is
+  Settings > FaceTime > 授权通讯录, then 刷新权限状态.
+- Documented native/system vs browser/profile authorization distinction.
+  No permissions changed, contact data read or FaceTime call dispatched here.
+  Successful real contacts lookup remains pending user's Mac authorization.
+
+## 2026-11-01: Real Browser Mac 30-Second Timer Accepted
+- User asks whether webpage tool popup meant actual countdown execution.
+  Read current agent logs and private SQLite in read-only URI mode; no new
+  tools dispatched, no credentials printed and no service/code changes.
+- Live15:55:49 registry exposes selected13 tools.15:56:00.989 model emits
+  timer_start(duration_seconds=30,label=30秒倒计时), completed15:56:06.940.
+- Native durable receipt succeeded/running for timer
+  A5C7A74A-89BF-48BD-873B-DA44912C34D6: created23:56:06.815+08:00,
+  due23:56:36.815+08:00. Correlated event occurred23:56:37.014+08:00;
+  server event POST20015:56:38.754, ACK persisted/suppressed.
+- Delivered native source confirms app-local SQLite timer (not Clock App),
+  settings countdown list and optional system notifications default off.
+  No actual Mac UI/notification permission/banner/sound inspection claimed.
+- env.sh + omni python -B /tmp/inspect_m2_timer_receipts.py exited0.
+  First inspection wrongly filtered request.name and printed no rows;
+  corrected to actual tool_name contract, then obtained matching receipt/event.
+  Chinese guide updated; only real timer creation/expiry slice accepted,
+  remaining tools/cancel/notification/audio delivery gates remain open.
+
+## 2026-11-01: Recover M2 Reports bridge_http_502
+- Recovered task-pinned plan without initialization; inspected parent/framework
+  Git status/diff, vllm submodules clean; preserved all dirty implementation.
+- Read current entry/agent logs, delivered M2Protocol/M2Bridge and existing
+  endpoint patch. Native discovery200 observed, no inbound bridge or server502
+  observed. Old independently hardcoded M2 WS endpoint remains a hypothesis
+  pending user's Mac source/build confirmation.
+- Added Chinese troubleshooting instructions: patch both protocol literals,
+  rebuild, fully quit old App, open new dist app and resume M2.
+  No runtime code/credentials/services changed and no Apple operation performed.
+- One guessed M2AutoConnect.swift read failed (file absent); source inventory
+  located M2AutoConnector.swift. No repeated guessed-path lookup.
+- env.sh + omni python -B /tmp/probe_mac_m2_activation.py exited0:
+  actual workspace/context match, M2 enabled, native waiting_scope_authorization,
+  health mimo/tts=true11ms. This read-only probe dispatched no tool; user must
+  keep browser connected and authorize selected scopes during retry.
+  git diff --check passed. No broad tests run for documentation-only changes.
+
+## 2026-11-01: Timer Request Delegated Without M2 Grant
+- User asks connection status and why countdown called reasoning. Fresh
+  read-only activation probe shows waiting_scope_authorization, actual mapping
+  correct, health mimo/tts=true12.6ms; no tool dispatched by probe.
+- Live15:45:43 call consult_reasoning_model asks it to confirm30-second timer
+  started. The request's model registry has only three baseline tools, no
+  timer_start/list/cancel. Native App polls discovery but no M2 bridge observed.
+- Therefore M2 service/network reachable, tool grant/manifest not completed.
+  Reasoning model is not timer executor; its response is not timer acceptance.
+  Guide user to explicit Mac permissions grant, then inspect Online/tools.
+  No automatic authorization, prompt/code change or service restart performed.
+
+## 2026-11-01: Activate Actual Mac M2 Mapping
+- User supplies formal context A010280A-41D2-4AD7-8C80-93458433280C
+  for workspace mac-main-demo and requests continuing M2 integration.
+- Scope before action: exclusive0600 selected13-tool policy for existing
+  duplex-mimo-mac-m5; focused M2 discovery/roundtrip and timer service tests;
+  reload only verified supervisor2479798/children2479959,2479961.
+- Preserve original private identity/audit/browser grants, MiMo8090,
+  external TTS8100, SSH443 and Next3000. Browser scopes remain explicit;
+  actual Mac profile/endpoint and real-tool acceptance are separate gates.
+- env.sh + omni verified interpreter/aiohttp; prepare_mac_m2.py created
+  /tmp/duplex-mac-m2-policy-20261101-actual.json exclusively0600. Two selected
+  tests passed1.039s: M2 discovery/roundtrip and timer same-turn continuation.
+- Approved SIGINT only to2479798, old PTY91938 exited0; new launcher
+  PTY29702 uses original runtime/private directory plus actual M2 policy.
+  Read-only live activation probe passed. No real Mac operation performed.
+- New run20261101T154042Z_mac_echo_22df36ac: agent2487105/8081,
+  entry2487107/8080. /tmp/probe_mac_m2_activation.py exited0 with
+  M2 enabled, exact actual owner mapping, waiting_scope_authorization;
+  health mimo/tts=true13.3ms. No grant issued or tool dispatched.
+- git diff --check passed. Browser explicit groups and Mac contacts/desktop
+  profile/endpoints still need user activation; real-tool acceptance pending.
+- Documentation patch context failed once without changes; reapplied against
+  exact paragraph, preserving prior records.
+
+## 2026-11-01: Mac M2 Workspace Selection
+- User requests M2 activation and identifies likely workspace mac-main-demo.
+- Read Mac M2Settings/App/M2Persistence: default alias becomes workspace_id
+  after explicit confirmWorkspace, bound to existing formalContextID shown
+  on settings page. Alias alone is insufficient; context ID cannot be inferred.
+- Existing endpoint patch and private policy generator retained. Documented
+  candidate workspace; waiting for actual Mac context_id before policy/start.
+  No credential read/change, service restart, test or real Apple operation.
+
+## 2026-11-01: Explicit Mac Tool Online Indicator
+- User confirms reconnection works and requests clear Mac online status.
+- Scope: frontend-only header and sidebar status, separate from Agent status;
+  green Online with available-tool count/names, amber Waiting for Mac,
+  unpaired/unavailable/offline states. No automatic conversation startup.
+- Online derives from connected session and live echo/M2 available tools,
+  never remembered browser grant alone; no backend restart needed.
+- tsc --noEmit --incremental false, Node source check and both diff --check
+  pass. Next dev hot reloads; no broad suite/service restart or browser
+  screenshot acceptance claimed. Chinese guide updated.
+
+## 2026-11-01: Mac Bridge Stops After Browser Refresh
+- User reports connected Agent without echo tool. Live15:18:50 shows real
+  demo_echo execution and TTS; later sessions have only baseline three tools.
+  Native discovery stops after first bridge close15:18:54.
+- Delivered H20AutoConnect maps4411 to stopped authorization_revoked, while
+  normal1000 triggers rediscovery. close_session previously reused revoke4411.
+- Scope: normal session teardown uses1000, explicit revoke remains4411;
+  cancellation and receipt fences unchanged. One targeted lifecycle test plus
+  two existing related cases; reload only owned application services.
+- Accidental malformed sed range exited1; corrected bounded read succeeded.
+- Three selected test_mac_tools cases pass2.853s: close1000 vs revoke4411,
+  native echo roundtrip and cancellation/late receipt fencing. Existing Mac
+  App stopped state requires one explicit resume; no Mac rebuild.
+- Approved SIGINT to verified2473176; old supervisor PTY92697 exited0.
+  New launcher PTY91938 retains original private directory/runtime. Readiness
+  probe passed. Documentation patch context failed once, corrected exactly.
+- New run20261101T152838Z_mac_echo_b9b2241f, agent2479959/8081,
+  entry2479961/8080. Online probe exited0: /agent200, health mimo/tts=true,
+  browser route/origin guard and capture handshake pass; diff --check passes.
+  No fresh real Mac invocation after repair or browser/audio acceptance claimed.
+
+## 2026-11-01: Remove Automatic Conversation Startup
+- User explicitly rejects automatic conversation startup. Removed page mount
+  connect effect, Auto connect control and all reads/writes of startup preference.
+  Opening/refreshing now stays disconnected until manual Connect.
+- Remembered browser grant and Mac authorization restore remain unchanged;
+  no backend, credentials, Mac App, model or service restart required.
+- Chinese chain guide corrected; tsc --noEmit --incremental false passes.
+  Node source check verifies no startup preference/mount connect path, manual
+  Connect and remembered browser retained. Both diff --check pass.
+  No broad backend tests or actual browser media test; Next dev hot reloads.
+
+## 2026-11-01: Remember Browser And Auto Start
+- User authorizes opening the Agent without repeated manual connection/pairing.
+- Scope before edits: persistent revocable browser grant in private SQLite,
+  HttpOnly host-only SameSite cookie, explicit remember checkbox at pairing,
+  same-origin HTTP/WS checks, fresh session restore and automatic page startup.
+  Preserve cancellation/generation fences; reject concurrent owner conflicts.
+- Persist selected M2 scopes only after explicit authorization and revalidate
+  device/policy/owner on restore. Persist capture hold so refresh cannot resume
+  FaceTime-paused microphone. No automatic writes/calls or device Token in JS.
+- Tests capped at5/module; prefer HTTP/WS restore/revoke/expired/owner cases.
+  Preserve all existing dirty changes, model/SSH/Next credentials and artifacts.
+- One accidental nonexistent skill-path read exited1 with no content; no
+  retry. Planning skill had already been read in full from its installed path.
+- Implemented browser_trust.py, HTTP/WS proxy cookie/origin handling, explicit
+  remember + forget UI, auto startup preference and bounded refresh conflict
+  retries. Persistent M2 scopes revalidated; capture hold is stored before
+  FaceTime pause handshake so refresh cannot silently re-enable capture.
+- env.sh + omni unittest test_browser_trust:5/5 passed (1.638s).
+  Selected test_svad_debug cases4/4 passed (2.145s), including real entry
+  proxy remember/new-WS restore, disabled-M2 handshake, echo and FaceTime guard.
+  tsc --noEmit --incremental false passed. No real Apple/FaceTime operation.
+- Two documentation patch attempts failed exact context and made no changes;
+  corrected against known complete paragraph; no prior records overwritten.
+- Approved SIGINT to verified supervisor2464913, old PTY22405 exited0.
+  New current-code launcher PTY92697 preserves original private directory and
+  verified runtime; fresh readiness/browser route probe passed.
+- New run20261101T151521Z_mac_echo_494d29a7, agent2473329/8081,
+  entry2473331/8080. env.sh + omni python -B /tmp/probe_agent_capture_ready.py
+  exited0: /agent200, health mimo/tts=true12.3ms, browser status200/untrusted,
+  hostile Origin403, remembered capability enabled, WS capture handshake pass.
+  No real device credential, browser grant or Apple operation was generated.
+- Both parent/framework diff --check pass. User must pair once with remember
+  checked; actual Mac browser refresh/microphone/autoplay acceptance remains
+  pending. No browser assets installed, screenshots or real UI test claimed;
+  no commit/push or external snapshot overwrite.
+- Final progress patch context mismatch made no changes; used actual wrapped
+  paragraph to record outcome without replacing historical evidence.
+
+## 2026-11-01: Recover Agent Capture Protocol Mismatch
+- User reports Unknown event agent.capture.ready on Agent startup. Selected
+  plan recovered with explicit pins; original plans and dirty work preserved.
+- Live agent.log at14:58:34/14:58:43 confirms rejection. Current source handles
+  the event, but supervisor2425475 and children2425667/8081,2425669/8080
+  still run the12:46 echo-only deployment. Next hot reload exposes new UI.
+- Scope before edits: one focused WebSocket handshake regression with M2
+  policy disabled; reload only verified owned application services using
+  original private identity and exclusive new logs. Preserve model8090,
+  external TTS8100, SSH443, Next3000 and all authorization gates.
+- Actual Mac workspace/context mapping remains pending; this repair does not
+  enable real M2 tools or perform Apple writes/phone calls.
+- env.sh + omni import probe confirms omni/bin/python and aiohttp from omni;
+  default editable vllm/vllm_omni remain sibling roots. Mock service tests use
+  experiment PYTHONPATH only; launcher pins verified runtime/current submodule.
+- Three selected unittest entries passed in1.442s: capture handshake without
+  M2 policy, FaceTime failed capture ACK prevents dispatch, and echo same-turn
+  continuation. Existing aiohttp warnings remain; no full suite or real call.
+- Verified old supervisor/child argv and launch metadata, approved SIGINT only
+  to2425475. Old supervisor exited0; child exit artifact reports[-2,-2].
+  New launch PTY22405 creates exclusive20261101T150329Z_mac_echo_34fc69c0,
+  agent2465079/8081 and entry2465081/8080, original private directory reused.
+  New service readiness and actual8080 proxy handshake probe passed.
+- env.sh + omni python -B /tmp/probe_agent_capture_ready.py exited0:
+  /agent200, /health mimo=true/tts=true, latency12.8ms; actual agent-ws
+  ready/hold/resume all acknowledged without error, M2 remains disabled and
+  available_tools empty. No inference or native operation was dispatched.
+- Parent git diff --check passes. Chinese chain guide records protocol skew
+  and refresh/re-pair steps. Mac credentials/model/SSH/Next preserved; user
+  browser microphone and real M2 tool-group acceptance remain open.
+
+## 2026-11-01: Begin Selected Mac M2 Tool Groups
+- User authorizes integration of timers, weather/travel, Apple reminders,
+  contacts and FaceTime. Preserve existing echo and native MiMo parser.
+- Read delivered Mac0.10 M2 wire/discovery/catalog/receipt contracts. Business
+  tools require v2 workspace/context and authorization_revision; cannot extend
+  echo v1 manifest. Mac M2 bridge/config still hardcodes historical WS address.
+- Scope before edits: separate M2 adapter with explicit group grants, shipped
+  schemas, authoritative durable receipts and cancellation; individual SDK
+  tools; confirmation for writes/calls, actual capture-stop ACK before FaceTime.
+  Timer events first persist and notify UI without claiming spoken delivery.
+- Keep echo credentials unchanged; new M2 policy opt-in separate. Prepare
+  Mac endpoint handoff without modifying sibling reference source. No automatic
+  system write or real phone call in tests. At most5 cases per module.
+- Official docs fetch unavailable; follow pinned SDK and delivered contracts.
+  Read attempt useDuplexMicrophone.ts absent; discovered useDuplexMedia.ts.
+- Implemented mac_m2.py and selected public contract import generator; shipped
+ 13 business tools, independent private workspace/scope policy, v2 discovery,
+ manifest/ACK/call/result/cancel/session update, offline archival and event
+ origin/dedup. Reused installed jsonschema, no dependency reinstall.
+- SDK JSON schema tools are dynamically registered through updateAgent;
+ transport dispatch is session-local with canonical argument comparison.
+ Browser group consent, exact write confirmation and FaceTime capture-stop
+ handshake are implemented. Device Token never enters browser.
+- Test results: test_mac_m2 5/5, selected test_svad_debug entries5/5
+ (v2 roundtrip, declined-write no dispatch, failed capture ACK no dispatch,
+ v1 echo and ordinary tool), SDK node test5/5, tsc passes.
+ No broad fixture suite or real Apple/FaceTime operation performed.
+- First tsc replay found missing RealtimeItem status narrowing in new test;
+ corrected type guard then tsc passed. Existing aiohttp/module-type warnings
+ retained. env.sh sandbox SSH chmod/link warnings did not prevent omni setup.
+- Prepared Mac copied-source endpoint patch with exclusive backup and private
+ policy generator plus launch --m2-policy-file. Sibling source untouched.
+ Current live app remains old echo version; M2 disabled until actual confirmed
+ Mac workspace/context supplied. Next dev source changes may hot reload;
+ refresh/reconnect needed after backend activation.
+- Chinese inventory/deployment guide and assessment updated. Browser assets
+ absent in checked Playwright paths, so no screenshots/real-browser acceptance.
+ Late/offline receipts archive without resuming old model; timer events are
+ UI-only and never claim spoken delivery. Real group gates remain open.
+
+## 2026-11-01: Next Credential Reload And Search Passed
+- User filled private configuration. Checked only credential_present=true
+  and private_permissions=true; no value printed or recorded.
+- Verified Next2393751/child2394014 ownership, approved SIGINT to dev process.
+  Restarted same loopback3000 project with env.sh, telemetry disabled,
+  npm run dev in PTY87444. Next15.5.9 reports .env.local loaded and ready.
+  MiMo/TTS/SSH/application bridge were not restarted.
+- env.sh + omni /tmp/probe_web_search_configured.py exited0. Real POST via
+  8080/api/tools/web-search query public official site num1 returned200,
+  one result, title OpenAI | Research & Deployment, error=null.
+  This accepts configured route/upstream search, not a new model-driven round.
+- Reasoning shares credential but has not been freshly invoked. Left Next
+  running for user. No broad suite, credential disclosure or commit.
+- Initial doc patch context was absent in current guide; preserved current
+  content and applied additive note to existing credential paragraph.
+
+## 2026-11-01: Reserve Next Private Credential Configuration
+- User requests Next location and configuration slot. Verified no .env.local
+  exists; current .gitignore ignores only .env, not .env.local.
+- Added exact .env.local ignore rule and empty ICHAT_API_KEY slot in
+  third_party/openai-realtime-agents/.env.local; no real credential supplied.
+  Restrict file0600 and verify Git ignore before handoff.
+- Chinese guide updated with configuration/reload boundary. No service
+  restart or tool success claimed; Next must reload after user fills key.
+
+## 2026-11-01: Diagnose Web Search Missing Credential
+- User reports Web search503/ICHAT_API_KEY not configured. Live14:21:06
+  logs confirm native MiMo search_web call, query Beijing latest news, num5.
+  SDK execution reached Next route, which returns503 before upstream request
+  when process.env.ICHAT_API_KEY is absent. Tool completion log does not
+  mean search succeeded; no live successful search accepted.
+- Route also confirms consult_reasoning_model uses same env variable.
+  Missing credential is in server-side Next tool service, not Mac App,
+  pairing Token or MiMo. No secret file read, credential change or restart.
+- Also observed browser-session demo_echo tool completion14:20:35; recorded
+  as log evidence only, not broad cancellation/late-receipt acceptance.
+
+## 2026-11-01: Real Mac Echo Invocation Passed
+- User asks current status. Fresh logs show native Mac polling resumed.
+  Reused /tmp/probe_real_mac_echo.py once with approved local connectivity,
+  env.sh + omni, original device identity and temporary echo-only session.
+- Exclusive artifact:
+  workspace/logs/20261101T133646Z_real_mac_echo_664f755a.
+  passed=true, connected=true; call chatcmpl-tool-b1596d6801d7c016,
+  returned succeeded/data.text=duplex-mac-live-test/error=null,
+  audit_receipt=true; same-turn MiMo continuation and12 TTS audio chunks.
+- Live13:36:47 logs prove native-parser MiMo call, correlated Mac response,
+  tool completion and round1 continuation. Probe exited0 and closed only its
+  temporary session; no restart/credential change or broader test suite.
+- This closes first real native Mac invocation gate, not real browser SDK
+  microphone/echo/cancel/late-result unified gate. Driver used live protocol
+  client, not RealtimeSession; prior fixed-SDK tests remain separate evidence.
+  Chinese guide updated; browser user session requires its own authorization.
+
+## 2026-11-01: Attempt User-Requested Real Mac Tool Call
+- User reports connected and requests tool test. Logs prove prior native
+  discovery, manifest connection and dynamic demo_echo registration at12:58:32.
+  Last voice round used no tools; bridge closed12:58:51. Fresh13:10:10
+  original-device discovery returned waiting_authorization, not connected.
+- Created /tmp/probe_real_mac_echo.py and exclusive artifact
+  workspace/logs/20261101T131836Z_real_mac_echo_45b113c8. Approved live
+  test uses existing private identity, temporary agent session and explicit
+  echo-only consent; never outputs Token/code. Intended audio/MiMo/native
+  execution/receipt/TTS check did not reach invocation.
+- Probe exited normally with passed=false/TimeoutError after25s waiting for
+  native bridge connection. No native discovery/bridge request arrived during
+  test; temporary session closed and authorization removed. No tool dispatched,
+  no receipt, no real execution acceptance. User must keep Mac automatic
+  connection running and browser session open for next test.
+- env.sh + omni used. No service restart, broad tests or model request made.
+  Guessed tts_backend.py read failed; reused known WAV fixture instead, but
+  readiness gate prevented replay. Preserved all prior outputs.
+
+## 2026-11-01: Fix Native Automatic Discovery Revision
+- User reports protocol mismatch on automatic resume. Native H20DeviceBinding
+  parser requires binding_revision regex `^[0-9a-f]{32}\.[0-9]+$`; server
+  returned a bare UUID for both waiting and authorized states.
+- Scope before edits: conform revision output to native v1, exercise waiting,
+  authorization and guarded WS in existing focused roundtrip test; preserve
+  device credentials during owned application reload. No Mac rebuild needed.
+- env.sh then omni; five focused test_mac_tools cases pass, including strict
+  discovery shape/revision checks and guarded WS. git diff --check passes.
+- Added launch --reuse-private-dir to preserve identity/audit during reload.
+  Verified old children2412677/2412679 belong to supervisor2412508, sent
+  approved SIGINT to supervisor only. New approved PTY62069 runs
+  workspace/logs/20261101T124625Z_mac_echo_ce0c3058,
+  children2425667/8081 and2425669/8080, original private directory reused.
+  Model/TTS/SSH untouched; readiness probe pending.
+- Fresh /tmp/probe_echo_revision.py exited0:8080/health200 mimo/tts=true,
+  original-device discovery200 via8080, revision format valid and state
+  waiting_authorization. No Token/code output. Owned supervisor remains
+  running for user. Real Mac automatic connection and echo still pending.
+- Guessed run_service.py path was absent; used inspected launch_mac_echo.py
+  instead. No repeated missing-file command or historical output overwrite.
+
+## 2026-11-01: Clarify Mac Automatic Connection And Clipboard
+- Recovered selected plan and inspected parent/framework Git status and parent
+  diff; preserved existing mac-tools changes. No service restart or code edit.
+- User reports clipboard byte counts 15 then 32. Latest length matches expected
+  pairing-code length, but contents, expiry and browser authorization are not
+  verified. No pairing code or Token requested or recorded.
+- Read App request/copy/clear and automatic connection lifecycle plus backend
+  discovery response. Automatic mode is supported after explicit browser
+  authorization; disabling it was diagnostic advice, not a prerequisite.
+  Connected/expired lifecycle clears the copied code only if still on clipboard.
+- Updated Chinese tool-use guide. Next user action: keep/resume automatic mode,
+  paste fresh code into connected Agent page, authorize and observe Online.
+  Real Mac invocation gate remains open. Documentation-only; no tests run.
+- First documentation patch failed findings heading verification; re-applied
+  using the actual heading. No existing record was overwritten.
+
+## 2026-11-01: Deploy Echo Application Services Through SSH
+- Fresh readiness passed:8080/health200 mimo/tts=true, /agent200,
+  capabilities200 enabled=true scope=demo_echo, /agent-ws returned
+  enabled=true/unpaired/connected=false. Silero loaded both services.
+  Left owned application supervisor running for user. Mac browser/device
+  pairing and inference execution remain separate open gates.
+- Mac login accepted on443 and hostname matches current TENCENT64.site.
+  Mac tunnel accepted but forwarded8080 refused because no application listener.
+  User authorized continued deployment; preserve original plans and dirty code.
+- Environment env.sh + omni verified; serving runtime imports pinned application
+  vllm-omni and existing 20261101T_native_mimo_agent_081500/runtime overlay.
+  Existing MiMo PID2301222/native parser preserved; MiMo8090 health200,
+  external TTS29.213.195.135:8100 health200, Next3000/agent200.
+- Added launch_mac_echo.py: exclusive timestamped run/private directories,
+  0600 client/auth files with independent random identity, no secret stdout,
+  owned child groups, immutable logs/launch metadata and bounded cleanup.
+  No production credentials copied. Private client URLs use SSH loopback8080.
+- Approved startup PTY6307: run20261101T105135Z_mac_echo_09d1140e,
+  agent PID2412677/8081 and entry PID2412679/8080. Both loopback only.
+  Existing runtime version mismatch warning retained. Readiness pending at
+  this entry; no device or unified model/browser acceptance claimed.
+
+## 2026-11-01: Fix443 Authorized-Key Parent Permissions
+- Mac confirmed correct443 host fingerprint but public-key login failed.
+  Server log specifically reports bad ownership/modes for /tmp; offered key
+  fingerprint matches configured public key. Do not change key or disable
+  StrictModes. passwd -S reports root locked; no password changes made, and
+  the observed rejection was authorized-key path checking.
+- Approved additive copy to /root/.ssh/duplex_443_authorized_keys (0600);
+  root and .ssh are0700. Updated only dedicated config AuthorizedKeysFile.
+  sshd -t passed; verified owned listener PID2407903 command and sent HUP.
+  Mac retry is required; no successful login claimed.
+
+## 2026-11-01: Configure User-Authorized SSH On443
+- User supplied Mac Ed25519 public key and requested use of permitted ports.
+  Created independent /tmp/duplex-ssh-443 config/authorized_keys (0600 under
+  0700 directory); historical cmd/sshd_test config and host key unchanged.
+- Approved creation of missing system sshd user with no login/no home creation,
+  and root-owned755 /var/empty. No root password or existing authorized_keys
+  modified. Conda sshd warned unsupported UsePAM; removed that option.
+- Approved sshd -t succeeded and daemon started with dedicated log/PID paths.
+  Log confirms28.29.218.56:443 listening; server-side socket returns
+  SSH-2.0-OpenSSH_10.5. Host Ed25519 fingerprint:
+  SHA256:pQel1GMcKMACRv7ga8YasxaOvgLot8rzBx21HFz2S3E.
+- Public-key-only root access accepts supplied key via isolated file. Local
+  forwarding limited to127.0.0.1 ports3000/8080/8081; agent/X11/tunnel/remote
+  forwarding disabled. No login from Mac or gateway traversal proven yet.
+  Runtime config is temporary, not a persistent boot/service deployment.
+
+## 2026-11-01: Inspect Compute-Node SSH Access
+- User requested read-only inspection of cmd/sshd_test and cmd/wss. Private
+  host key was not read; only file metadata and sshd_config inspected.
+  sshd_test is native SSH on443, password disabled/public key enabled,
+  PermitRootLogin yes. wss is plain WS echo on8081, not SSH-over-WebSocket.
+  Client hardcodes historical28.29.211.154; current hostname -I includes
+  28.29.218.56 and multiple28.10.* interfaces. External Mac route remains
+  unverified; do not infer reachability solely from interface enumeration.
+- Sandbox /proc network tables empty; approved external read showed numerous
+  unrelated sockets (output truncated). Replaced broad dump with filtered
+  read:22 listens on28.29.218.56,3000 on127.0.0.1; no80/443/8080/8081
+  listener in this snapshot.443 connect_ex111 on loopback and node interface.
+- env.sh initialized; existing sshd -t config failed with
+  `Privilege separation user sshd does not exist`. Current container root has
+  no /root/.ssh/authorized_keys. No daemon started, OS account created,
+  key installed, historical external config altered or unknown service stopped.
+
+## 2026-11-01: Complete Focused Echo Implementation Verification
+- Final post-change replay again passed bridge 5/5, SDK 4/4, tsc and both
+  diff checks. Approved cp -n published the new additive
+  Omni/Doc/duplex_mimo_tool_use_zh_20261101_echo_verified.md; diff -q passed.
+  Read-only aiohttp probes for local3000/duplex-mimo,8080/agent,8081/health
+  all returned ClientConnectorError; no live backend deployment accepted.
+- Started owned frontend preview with env.sh, NEXT_TELEMETRY_DISABLED=1,
+  npm run dev -- --hostname127.0.0.1 --port3000 (PTY71233). Next15.5.9 ready;
+  direct curl /duplex-mimo returned200. Left this preview running for user
+  access; it is not a usable inference/Mac connection until backend deployment.
+  No browser screenshot or real microphone/device proof.
+- Continued pre-existing dirty parent/framework mac-tools branches. Read selected
+  plan/findings and progress current sections, Stage3 README/Stage6 decision
+  records, parent diff and recursive submodule status. Preserved wx_tts_ref.py;
+  vLLM submodules remain clean. No new plan, transcript access, commits or push.
+- Implemented echo-only native v1 bridge, auth digest/private file checks,
+  explicit one-time consent, discovery/manifest, SQLite persist-before-dispatch,
+  exact correlated receipts, deduplication and generation cancellation.
+  Agent backend proxies native routes, checks pending call arguments and only
+  accepts authoritative success/failure outputs. SDK executes via session-local
+  context, updates executable registry using updateAgent, exposes pairing/revoke
+  controls and suppresses late outputs. Existing MiMo parser is unchanged.
+- Initialized env.sh then omni. Interpreter:
+  /mnt/geminihzceph/user_whynotzhliu/my_envs/miniconda3/envs/omni/bin/python.
+  aiohttp imports from that environment. find_spec confirms vllm/vllm_omni still
+  point to sibling editable sources. Tests use experiment PYTHONPATH only:
+  no heavy vLLM import/model loading required for the exercised mock paths,
+  no editable install change or inferred runtime-overlay acceptance.
+- Commands: `PYTHONPATH=workspace/experiments/20261025_mimo_tts_integration
+  python -B -m unittest -v test_mac_tools`: five relevant native bridge cases
+  passed after approved socket access; second run has no unclosed-peer warnings.
+  Cases cover native roundtrip/durability, auth/consent/schema, cancel/late
+  receipt, timeout/no redispatch and duplicate/owner conflict.
+- `node --experimental-strip-types --test
+  src/app/lib/DuplexMiMoTransport.test.ts` in framework: 4/4 passed including
+  actual pinned SDK dynamic register/context/execute/history plus interruption.
+  Existing module-type warning retained, no unrelated package metadata changes.
+- `python -B -m unittest -v` with experiment PYTHONPATH and the three selected
+  test_svad_debug.DebugServiceTests entries: test_mac_echo_round_trip_continues_same_chat,
+  test_agent_function_call_round_trip_continues_chat,
+  test_agent_response_cancel_stops_current_chat: 3/3 passed. Existing aiohttp
+  AppKey/deprecation warnings retained; final concise replay suppressed warnings.
+- `./node_modules/.bin/tsc --noEmit --incremental false`: passed after correcting
+  context/handoff generics and narrowing manifest string instructions.
+- Failures/resolutions: initial bridge run socket EPERM -> approved escalation;
+  initial SDK config assertion lacked instructions -> explicit test instructions;
+  second SDK test awaited without connect/listeners -> cancelled owned test,
+  added connect + 3s timeout, rerun passed; first service echo test read a
+  session.update as tool.call -> consume control frames and add peer cleanup,
+  rerun passed. No failed result counted as acceptance.
+- pgrep found existing MiMo PID2301222 and Next PID2360345; no service restarted
+  or model request sent. /proc environ/cwd inspection denied; no ownership
+  assumptions adopted. Local Playwright/Chromium discovery found no assets,
+  including absent /root/.cache/ms-playwright. Browser visual, real device,
+  unified live SDK/model/bridge and 8080 proxy acceptance remain open.
+- Chinese tool_use_zh.md now maintains current v1 scope, private config/startup,
+  one-time pairing, native routes, TLS boundary and per-tool remaining status.
+  Prior external dated snapshots are preserved; new publication remains pending.
+
+## 2026-11-01: Implement First SDK Mac Echo Slice
+- Selected existing task with explicit resolver pin; preserved prior dirty
+  planning/docs and wx_tts_ref.py. Parent/framework stay on mac-tools branches;
+  both vLLM submodules clean. No competing plan or transcript access.
+- Scope before code: embedded model-independent aiohttp echo bridge, compatible
+  native v1 manifest/call/result/auto-discovery, explicit one-time browser
+  pairing consent over the existing Agent WS, SDK execute/context bridge and
+  UI controls. Disabled unless independent private auth/audit paths supplied.
+- First slice intentionally does not migrate remembered relationships, M2
+  business scopes or old Qwen/capture/history loops. Native device Token never
+  enters browser. Persist calls before dispatch and validate authoritative
+  receipts; cancellation/reset/disconnect invalidate old outputs.
+- SDK package lookup guessed session.* path failed; actual pinned package uses
+  realtimeSession.mjs. Local source confirms tool execute receives RunContext
+  with history; use session-local transport in context, not a global tool client.
+- Official docs lookup returned no usable output; implementation follows pinned
+  SDK sources and inspected native contract. No current upstream claim.
+- Acceptance target: no more than five focused bridge/SDK tests, including
+  actual WebSocket round trip, auth/consent, cancellation/late result, timeout
+  and duplicate/conflicting receipts. Real Mac remains a separate user-device
+  gate; do not claim it passed from a protocol-compatible peer.
+
+## 2026-11-01: Chinese Chain And Tool Use Documentation
+- Reused task-pinned resolver and current selected plan sections, preserving
+  previous records/diff and the untracked wx_tts_ref.py. Parent remains on
+  feature/stage6-mac-tools; recursive submodule worktrees remain clean.
+- Scope before edits: add Chinese deployment/call chain, pairing/authorization,
+  per-tool usage/parameters/results/limits/status, lifecycle and maintenance
+  rules. Documentation only; no new executor or runtime acceptance.
+- Read current SDK tool registry, prior assessment, cumulative Mac catalog,
+  and located separate deployed song extension. Full JSON dump was truncated;
+  follow with compact input projections and targeted source reads.
+- Compact Node JSON projection covered all 28 input schemas/descriptions and
+  both timer event scopes. Read current search/reasoning routes and deployed
+  fc_song.py: song_start is server-owned, with task acceptance distinct from
+  playback, generation cancellation and 48kHz stereo chunks.
+- Added maintained Chinese `Doc/stage6-agentic/tool_use_zh.md`: runtime
+  locations/chain, pairing/scopes, 3 SDK tools + 28 Mac tools + song_start,
+  2 event permissions, parameter/result/use limits, status, receipt IDs,
+  cancellation/idempotency and per-tool maintenance requirements.
+- Added navigation in Stage6 README, guide and prior assessment, and recorded
+  the ongoing documentation obligation in the selected original task plan.
+- Node document verification PASS: 32 unique tool rows, all 28 Mac input-field
+  inventories, 2 event scopes, balanced code fences and 3 navigation links.
+  `git diff --check` returned 0. No unit/GPU tests or inference commands ran
+  because no runtime code changed; no interpreter/import acceptance claimed.
+- Approved cp -n published
+  `/mnt/geminihzceph/user_whynotzhliu/Omni/Doc/duplex_mimo_tool_use_zh_20261101.md`;
+  diff -q returned 0. Canonical file remains the maintained version; external
+  dated snapshot is additive. No historical outputs or records overwritten.
+- Parent documentation/planning changes remain uncommitted; submodule source
+  and gitlinks untouched, wx_tts_ref.py preserved, services unchanged. Tool
+  adaptation/real Mac acceptance remain pending.
+
+## 2026-11-01: Recover Agent Stage And Assess Existing Tools
+- Read both installed and user-specified planning skill files completely;
+  explicitly resolved `2026-10-25-mimo-single-omni-duplex` under this root.
+  Read the complete selected planning triplet and Stage3 README plus all four
+  Stage6 records. No initialization, overwrite or transcript recovery.
+- `printenv PLAN_ID PWF_PLAN_ROOT` returned 1 with no values; explicit resolver
+  pins succeeded. This subprocess pin does not bind the parent host hooks.
+- Parent `git status --short --branch` and `git diff --stat`: clean tracked
+  `feature/stage6-agentic`, preserved untracked `wx_tts_ref.py`. Recursive
+  submodule status/diff: three clean worktrees and no gitlink changes.
+- User redirects the next action to existing tools from `h20_duplex_fc_dev`,
+  with a new branch and at most five directly relevant test cases per module,
+  preferring end-to-end validation. Existing broad acceptance gates stay open.
+- External broad README/file inventory exceeded output limits; do not treat
+  truncated historical logs as complete recovery. Read bounded current tool
+  contracts/source instead. No external script was executed.
+- Read current SDK registry/manifest, AgenticMiMoChatProvider, old M2 routes,
+  bridge/core and invocation lifecycle, plus desktop/travel/contact contracts.
+  Node structured JSON inspection confirms cumulative catalog counts 9/12/26/28.
+  Execution is native Mac-side; old runtime requires session/owner/grant/
+  generation and exposes no generic execute HTTP route.
+- OpenAI Docs skill read completely; official search/page retrieval produced
+  no usable output. No latest SDK claim or web-derived design was adopted.
+- Approved `git switch -c feature/stage6-mac-tools` succeeded independently in
+  the parent and framework submodule, based on `57f4abf`/`86469fd`. Original
+  branches remain; no code changes, gitlink update, commit or push.
+- Updated original plan additively to reflect Stage6 and its first pending
+  demo_echo adapter gate. Added canonical
+  `Doc/stage6-agentic/mac_tools_integration_20261101.md` and README navigation.
+  `git diff --check` returned 0; recursive submodule status remains clean.
+- Approved `cp -n` published the additive external snapshot at
+  `/mnt/geminihzceph/user_whynotzhliu/Omni/Doc/duplex_mimo_mac_tools_integration_20261101.md`;
+  `diff -q` returned 0. No historical document was overwritten.
+- No tests, inference or environment commands ran: changes are documentation/
+  planning only. No service ownership or live availability claim. Next work is
+  the narrow SDK-to-Mac echo adapter, at most five relevant cases per module,
+  followed by a real device invocation; writes/events/FaceTime remain separate.
+
 ## Session: 2026-10-25
 
 ### Current Status
