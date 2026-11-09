@@ -6,3 +6,6 @@
 	path = vllm-src
 	url = https://github.com/Applauzzz/vllm.git
 	branch = duplex-stage2
+[submodule "third_party/openai-realtime-agents"]
+	path = third_party/openai-realtime-agents
+	url = https://github.com/Applauzzz/openai-realtime-agents.git

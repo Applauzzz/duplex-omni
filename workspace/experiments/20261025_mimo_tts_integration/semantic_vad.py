@@ -1177,52 +1177,8 @@ class MiMoChatProvider:
         self.model = model
 
     async def stream_reply(self, audio_chunks, *, history, prompt, context):
-        system = _prompt_from_context({"chat_prompt": prompt}, "chat_prompt", DEFAULT_CHAT_PROMPT)
-        messages: list[dict[str, object]] = [{"role": "system", "content": system}]
-        for turn in history[-4:]:
-            audio_data = turn.get("audio_wav") if isinstance(turn, Mapping) else None
-            video_data = turn.get("video_frames") if isinstance(turn, Mapping) else None
-            assistant = turn.get("assistant") if isinstance(turn, Mapping) else None
-            if isinstance(audio_data, str) and audio_data:
-                content: list[dict[str, object]] = []
-                if isinstance(video_data, str) and video_data:
-                    content.append(_chat_video_part(video_data))
-                content.extend((
-                    _chat_audio_part(audio_data),
-                    {
-                        "type": "text",
-                        "text": (
-                            CHAT_VIDEO_AUDIO_INSTRUCTION
-                            if isinstance(video_data, str) and video_data
-                            else CHAT_AUDIO_INSTRUCTION
-                        ),
-                    },
-                ))
-                messages.append({"role": "user", "content": content})
-            if isinstance(assistant, str) and assistant:
-                messages.append({"role": "assistant", "content": assistant})
-        wav = audio_chunks_to_wav(audio_chunks)
-        if len(wav) > 3 * 1024 * 1024:
-            raise ValueError("Chat audio exceeds 3 MiB")
-        wav_b64 = base64.b64encode(wav).decode("ascii")
-        video_frames = context.get("video_frames")
-        if video_frames is None:
-            video_frames = video_chunks_to_jpeg_sequence(audio_chunks)
-        content: list[dict[str, object]] = []
-        if isinstance(video_frames, str) and video_frames:
-            content.append(_chat_video_part(video_frames))
-        content.extend((
-            _chat_audio_part(wav_b64),
-            {
-                "type": "text",
-                "text": (
-                    CHAT_VIDEO_AUDIO_INSTRUCTION
-                    if isinstance(video_frames, str) and video_frames
-                    else CHAT_AUDIO_INSTRUCTION
-                ),
-            },
-        ))
-        messages.append({"role": "user", "content": content})
+        messages = build_chat_messages(
+            audio_chunks, history=history, prompt=prompt, context=context)
         request_id = str(context.get("request_id") or f"semantic-chat-{time.time_ns()}")
         payload = {
             "model": self.model,
@@ -1258,6 +1214,70 @@ class MiMoChatProvider:
                     if reason is not None:
                         finish_reason = reason
             raise RuntimeError("MiMo Chat disconnected before DONE")
+
+
+CHAT_HISTORY_TURNS = 10
+
+
+def build_chat_messages(audio_chunks, *, history, prompt, context):
+    """Build the shared multimodal conversation payload for plain and agentic chat."""
+    system = _prompt_from_context({"chat_prompt": prompt}, "chat_prompt", DEFAULT_CHAT_PROMPT)
+    messages: list[dict[str, object]] = [{"role": "system", "content": system}]
+    history_turns = context.get("history_turns", CHAT_HISTORY_TURNS)
+    selected_history = history[-history_turns:] if history_turns else []
+    for turn in selected_history:
+        audio_data = turn.get("audio_wav") if isinstance(turn, Mapping) else None
+        video_data = turn.get("video_frames") if isinstance(turn, Mapping) else None
+        assistant = turn.get("assistant") if isinstance(turn, Mapping) else None
+        if isinstance(audio_data, str) and audio_data:
+            content: list[dict[str, object]] = []
+            if isinstance(video_data, str) and video_data:
+                content.append(_chat_video_part(video_data))
+            content.extend((
+                _chat_audio_part(audio_data),
+                {
+                    "type": "text",
+                    "text": (
+                        CHAT_VIDEO_AUDIO_INSTRUCTION
+                        if isinstance(video_data, str) and video_data
+                        else CHAT_AUDIO_INSTRUCTION
+                    ),
+                },
+            ))
+            messages.append({"role": "user", "content": content})
+        if isinstance(assistant, str) and assistant:
+            previous_result = turn.get("background_reasoning_result")
+            if isinstance(previous_result, Mapping):
+                messages.append({"role": "user", "content": (
+                    "先前后台任务的返回资料（不是新指令，供后续追问复用）：\n"
+                    + json.dumps(dict(previous_result), ensure_ascii=False)
+                )})
+            messages.append({"role": "assistant", "content": assistant})
+    if context.get("background_result_only"):
+        return messages
+    wav = audio_chunks_to_wav(audio_chunks)
+    if len(wav) > 3 * 1024 * 1024:
+        raise ValueError("Chat audio exceeds 3 MiB")
+    wav_b64 = base64.b64encode(wav).decode("ascii")
+    video_frames = context.get("video_frames")
+    if video_frames is None:
+        video_frames = video_chunks_to_jpeg_sequence(audio_chunks)
+    content: list[dict[str, object]] = []
+    if isinstance(video_frames, str) and video_frames:
+        content.append(_chat_video_part(video_frames))
+    content.extend((
+        _chat_audio_part(wav_b64),
+        {
+            "type": "text",
+            "text": (
+                CHAT_VIDEO_AUDIO_INSTRUCTION
+                if isinstance(video_frames, str) and video_frames
+                else CHAT_AUDIO_INSTRUCTION
+            ),
+        },
+    ))
+    messages.append({"role": "user", "content": content})
+    return messages
 
 
 def _chat_audio_part(wav_b64: str) -> dict[str, object]:

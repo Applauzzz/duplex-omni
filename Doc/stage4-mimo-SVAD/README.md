@@ -1,5 +1,8 @@
 # Stage 4: MiMo Semantic VAD
 
+2026-11-03 独立启动交接（当前代码/配置，不沿用下文历史IP和PID）：
+[普通 VAD + MiMo + TTS 启动文档](../standalone_vad_mimo_tts_start_20261103.md)。
+
 > 2026-10-30 policy update: the active implementation uses one mandatory
 > `VASD_SEM` classifier. `无` rejects the candidate; accepted `有` enters
 > Listen/PREFILL. If browser TTS playback is active, the same accepted result

@@ -7,6 +7,78 @@ and Qwen3-TTS CustomVoice as the initial independent speech renderer.
 Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
+November9 user authorizes current feature/stage6-mac-tools checkpoint commit
+and push (framework first, parent gitlink second); user will merge main.
+Keep unfinished audio/playback/quality gates open and all live services intact.
+Exclude tmp draft, historical wx_tts_ref.py, credentials and raw run artifacts.
+
+November4 plain VAD deployed on28.29.217.68:8080, run
+20261104T105813Z_intranet_vad_bfvtKZxP. TP4/EP GPU0-3 MiMo loopback8090,
+external CosyVoice8100, history30/current Chinese prompt preserved.
+Health/routes/defaults/WS and real speech->七/PCM passed. Services retained.
+Next user Mac intranet reachability/capture/playback acceptance, then warm
+latency/long-reply overlap if requested. No agentic enable or code refactor.
+Historical host PIDs are not current owners.
+
+November2 direct-delivery feedback correction: require substantive analysis in
+ready turn, no "want to hear?" confirmation. Preserve background result in
+bounded turn history for followup reuse. Focused5/5 and real MiMo two-turn text
+probe pass (no repeated reasoning); reload application then user audio trial.
+No keyword gate, forced semantic classifier, commit or push.
+
+November2 Stage6.1 implemented and deployed in run20261102T165557Z_mac_echo_735385b6:
+focused Python8/SDK2/tsc pass, current defaults enable background reasoning
+and10-turn history; health/M2 mapping/page200 pass. Next manually reconnect
+browser and accept real MiMo placeholder, intervening ordinary tool, combined
+answer and rejected-input delivery; screenshots/playback remain unaccepted.
+No push requested. The implementation scope supersedes historical next actions:
+single connection-scoped nonblocking consult_reasoning_model, immediate
+placeholder, next-response result injection, rejected-input result-only path,
+and yellow/green task status. Preserve ordinary blocking tools and native
+parser. Verify SDK receipt survival across interrupt, strict arguments,
+focused tests (at most5/module), Chinese documentation, then application reload.
+Keep all-in-one config edits and feature/stage6-mac-tools branch; no push requested.
+
+Real browser30s timer_start succeeded and correlated timer.finished persisted
+November1 at15:56UTC. Mac M2 now negotiated selected13 tools in that session;
+accept timer slice only, not all tool groups. Next verify user's Mac countdown
+UI/optional system notification and selected read-only groups; no auto speech.
+User's Resume M2 reports bridge_http_502. Discovery reaches current8080 but
+no M2 bridge observed; verify Mac's independently hardcoded historical WS
+endpoint using existing patch/rebuild/quit-reopen steps. Root cause not yet
+confirmed on the actual Mac. Preserve running services and explicit grants.
+Actual M2 mapping supplied: mac-main-demo /
+A010280A-41D2-4AD7-8C80-93458433280C for duplex-mimo-mac-m5. Private
+policy generated; application activation and read-only readiness passed.
+Next accept browser scope consent and real Mac manifest, then selected tools
+incrementally. No automatic dialogue start, writes or FaceTime calls.
+User correction: no automatic conversation startup. Page mount remains
+disconnected; manual Connect restores remembered Mac authorization. Browser
+grant feature stays; startup preference/control removed. Verify focused UI.
+November1 browser continuity: remembered browser grant and automatic startup
+implemented and deployed; five grant/four service cases, tsc and live8080
+route/handshake pass. Accept user's one-time remembered pairing and actual
+browser reopen/media workflow next. Fresh call fences, M2 scope consent and
+FaceTime capture hold preserved. Actual M2 mapping gate remains pending.
+November1 selected-tool extension: M2 adapters and SDK/UI implemented for13
+timers/weather-travel/reminders/contacts-FaceTime tools. Configure actual Mac
+workspace/context IDs before enabling independent private M2 policy; update
+Mac M2 endpoint and profiles, then accept real groups separately. Timer events
+are persisted and shown in UI; active speech delivery is not enabled.
+November1 agent-stage recovery supersedes the historical next actions below.
+Continue existing Stage6 implementation on `feature/stage6-mac-tools` in the
+parent and agent framework submodule. Assess and adapt the existing Mac tool
+bridge from `h20_duplex_fc_dev`; preserve native MiMo tool parsing, SDK tool
+execution/history and current duplex media/inference. First implementation
+gate is authenticated/authorized `demo_echo` through a real RealtimeSession
+and Mac-compatible bridge, including cancellation and stale receipt fencing.
+The v1 echo adapter and focused protocol/SDK tests are implemented; real Mac,
+unified live browser/model/device and remaining M2 tools are not accepted.
+See `Doc/stage6-agentic/mac_tools_integration_20261101.md`.
+Maintain the Chinese chain/tool-use inventory in
+`Doc/stage6-agentic/tool_use_zh.md` alongside every tool implementation/status
+change; it covers current SDK tools, Mac tools and separate song/events.
+
 October30 policy simplification: replace the parallel VASD_SEM/VASD_BREAK
 design with one mandatory VASD_SEM classifier. `无` rejects candidate audio;
 `有` always admits it into Listen/PREFILL, and if TTS playback is active the
@@ -68,12 +140,29 @@ semantic policy, strict real-stage idle, broad acoustic false positives and
 performance gates. Preserve models/results. Use env.sh then omni.
 
 ## Current Phase
+November1: Stage6 Agent tool integration assessment complete; first Mac bridge
+implementation verified with focused protocol/SDK tests, real device pending.
+Existing transport/native-parser/search/time/reasoning
+implementation is committed at parent `57f4abf`, framework `86469fd`.
+The wider historical acceptance gates below remain open; this is not a release
+or fresh browser/GPU acceptance.
+
 Phase 5A/5C existing VAD/frontend integration (in_progress), user correction.
 Phase2/3/4 remaining acceptance gates stay open; learned semantic5B pending.
 Basic integration checkpoint accepted for publication by user; runtime stopped
 by user request. Publication does not close the broader acceptance gates.
 
 ## Phases
+
+### Stage 6.1: Nonblocking Reasoning
+- [x] Implement connection-scoped single job and next-turn result snapshot
+- [x] Implement placeholder and parsed sole-reasoning invocation checks
+- [x] Verify service rejection/result-only and cancellation lifecycle
+- [x] Verify real SDK concurrent ordinary tool and background receipt survival
+- [x] Complete Chinese policy/flow/config and limitations documentation
+- [x] Reload application and verify readiness; real browser/model acceptance separate
+- [ ] Accept real model/browser placeholder, ordinary tool and result delivery
+- **Status:** in_progress
 
 ### Phase 1: Architecture Discovery and Durable Planning
 - [x] Restore/check existing plans and Git worktree
@@ -138,6 +227,23 @@ by user request. Publication does not close the broader acceptance gates.
 - [ ] Record release decisions and operational knowledge
 - **Status:** pending
 
+### Stage 6 Extension: Existing Mac Tools
+- [x] Recover selected plan and audit parent/submodule changes
+- [x] Inspect current SDK registry and external Mac catalogs/runtime/routes
+- [x] Create parent and framework `feature/stage6-mac-tools` branches
+- [x] Implement the narrow authenticated/authorized demo_echo bridge adapter
+- [ ] Validate SDK-to-bridge result, cancel and stale-output behavior end to end
+- [x] Validate one real Mac invocation before claiming device execution
+- Real Mac demo_echo passed November1 through live protocol driver, native
+  MiMo parsing, correlated durable receipt, same-turn continuation and TTS.
+  Unified real browser SDK and cancellation/late-result gates remain open.
+- [ ] Extend selected read-only tools, then separately accept writes/events
+- [x] Implement selected13-tool v2 policy/manifest/receipt bridge and SDK/UI
+- [ ] Activate actual Mac workspace mapping and accept each real tool group
+- **Status:** in_progress
+- Per-module verification is capped at five relevant test cases, preferably
+  end-to-end. Do not rerun old broad safety suites by default.
+
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
@@ -159,6 +265,8 @@ by user request. Publication does not close the broader acceptance gates.
 | Make interrupted assistant retention configurable and mark retained partial output with one token | Preserve the current discard default while allowing later turns to refer to the exact interruption point without automatically continuing the old answer |
 | Limit this state-machine change to at most five focused test entry points | User explicitly requested a compact suite; prioritize end-to-end WebSocket behavior and directly affected state/provider tests |
 | Collapse semantic admission and barge-in into one VASD_SEM result | User explicitly abandons simultaneous user/agent speech; any accepted semantic speech during TTS playback must interrupt, while the same result admits the turn |
+| Adapt Mac tool contracts beneath SDK execution, not the old LLM dialogue loop | Preserve native MiMo parsing and SDK history; old M2Runtime.invoke requires explicit session/authorization/generation mapping |
+| Start with demo_echo before exposing the catalog | Tool definitions alone cannot prove a connected authorized Mac executor |
 
 ## Phase Deliverables and Acceptance
 

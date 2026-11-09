@@ -10,7 +10,7 @@ import unittest
 
 import cv2
 import numpy as np
-from aiohttp import ClientSession
+from aiohttp import ClientSession, WSServerHandshakeError
 from aiohttp.test_utils import TestServer
 
 from semantic_vad import (
@@ -104,6 +104,26 @@ class SlowChatProvider:
         yield "现在是第二句。"
 
 
+class AgentBridgeChatProvider:
+    def __init__(self):
+        self.calls = []
+
+    async def stream_reply(self, audio_chunks, *, history, prompt, context):
+        self.calls.append({
+            "agent_config": dict(context["agent_config"]),
+            "audio_chunks": tuple(audio_chunks),
+        })
+        output = await context["agent_tool_handler"]({
+            "id": "call-weather",
+            "type": "function",
+            "function": {
+                "name": "lookup_weather",
+                "arguments": "{\"city\":\"北京\"}",
+            },
+        })
+        yield "工具返回：" + output
+
+
 class TTSSession:
     def __init__(self, provider, request_id):
         self.provider = provider
@@ -193,6 +213,93 @@ class FailingTTSProvider(TTSProvider):
 
 
 class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_background_result_survives_interrupt_and_rejected_input(self):
+        from semantic_vad import InputEvent
+
+        class Adapter:
+            last_avad = {}
+            controller = SimpleNamespace(fsm=SimpleNamespace(candidate_audio=[], turn_audio=[]))
+            def __init__(self):
+                self.first = True
+                self.count = 0
+            async def process_append(self, append, **_kwargs):
+                self.count += 1
+                first, self.first = self.first, False
+                return SimpleNamespace(
+                    interrupt=False, reject=self.count == 2,
+                    event=InputEvent.DECODE if self.count != 2 else InputEvent.NO_OP,
+                    decode_audio=(append,) if self.count != 2 else (),
+                    as_log=lambda: {},
+                ), []
+            def close(self):
+                pass
+
+        class Chat:
+            async def stream_reply(_self, audio_chunks, *, history, prompt, context):
+                if context["background_reasoning_result"]:
+                    self.assertTrue(context["background_result_only"])
+                    self.assertEqual(audio_chunks, ())
+                    self.assertEqual(context["background_reasoning_result"]["result"], "real result")
+                    yield "先前问题的分析结论是实际结果。"
+                elif history and history[-1].get("background_reasoning_result"):
+                    self.assertEqual(history[-1]["background_reasoning_result"]["result"], "real result")
+                    yield "复用先前结果继续讲解。"
+                else:
+                    await context["background_reasoning_handler"]({
+                        "id": "background-call", "function": {
+                            "name": "consult_reasoning_model",
+                            "arguments": '{"task":"original question","context":null}',
+                        }})
+                    yield "稍后告诉你。"
+
+        self.settings["config"]["background_reasoning"] = True
+        self.config_path.write_text(json.dumps(self.settings), encoding="utf-8")
+        self.app["agentic"] = True
+        self.app["chat_provider"] = Chat()
+        self.app["adapter_factory"] = lambda *_args, **_kwargs: Adapter()
+        async with asyncio.timeout(5):
+            ws = await self.client.ws_connect(self.server.make_url("/ws"))
+            await ws.send_json({"type": "agent.session.update", "instructions": "test", "tools": []})
+            await ws.receive_json()
+            await ws.send_json({"type": "configure"})
+            while (await ws.receive_json())["type"] != "configured":
+                pass
+            audio = {"type": "audio", "audio": base64.b64encode(b"\1\0" * 512).decode(),
+                     "format": "pcm16", "sample_rate_hz": 16000}
+            await ws.send_json(audio)
+            call_id = None
+            placeholder_done = False
+            while True:
+                event = await ws.receive_json()
+                if event["type"] == "agent.function_call":
+                    call_id = event["call_id"]
+                if event["type"] == "chat.done":
+                    placeholder_done = True
+                if placeholder_done and call_id:
+                    break
+            await ws.send_json({"type": "response.cancel"})
+            await ws.send_json({"type": "agent.function_call_output", "call_id": call_id,
+                                "output": "real result"})
+            while True:
+                event = await ws.receive_json()
+                if event["type"] == "agent.background.status" and event["status"] == "ready":
+                    break
+                self.assertNotEqual(event["type"], "error")
+            await ws.send_json(audio)
+            while (await ws.receive_json())["type"] != "chat.done":
+                pass
+            event = await ws.receive_json()
+            self.assertEqual(event["type"], "agent.background.status")
+            self.assertEqual(event["status"], "delivered")
+            await ws.send_json(audio)
+            while True:
+                event = await ws.receive_json()
+                self.assertNotEqual(event["type"], "agent.function_call")
+                if event["type"] == "chat.done":
+                    self.assertEqual(event["text"], "复用先前结果继续讲解。")
+                    break
+            await ws.close()
+
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.config_path = Path(self.temp_dir.name) / "svad_config.json"
@@ -247,6 +354,97 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.server.close()
         self.temp_dir.cleanup()
 
+    async def test_plain_intranet_origin_and_agent_https_boundary(self):
+        headers = {"Host": "28.29.217.68:8080", "Origin": "http://28.29.217.68:8080"}
+        async with self.client.ws_connect(self.server.make_url("/ws"), headers=headers) as ws:
+            await ws.send_json({"type": "configure", "tts_enabled": False})
+            event = await asyncio.wait_for(ws.receive_json(), 3)
+            self.assertEqual(event["type"], "configured")
+        for origin in ("http://evil.example", "null", "http://28.29.217.68:8080/path"):
+            with self.assertRaises(WSServerHandshakeError) as failure:
+                await self.client.ws_connect(
+                    self.server.make_url("/ws"), headers={**headers, "Origin": origin})
+            self.assertEqual(failure.exception.status, 403)
+        self.app["agentic"] = True
+        with self.assertRaises(WSServerHandshakeError) as failure:
+            await self.client.ws_connect(self.server.make_url("/ws"), headers=headers)
+        self.assertEqual(failure.exception.status, 403)
+
+    async def test_browser_remember_through_entry_proxy(self):
+        from aiohttp import web
+        from svad_debug_server import websocket
+        from browser_trust import BrowserTrust
+        from mac_tools import EchoBridge
+        from mac_m2 import M2Bridge
+
+        auth = Path(self.temp_dir.name) / "browser-auth.json"
+        auth.touch(mode=0o600)
+        auth.write_text(json.dumps({"version": 1, "devices": [{
+            "device_id": "test-mac", "token_sha256": "a" * 64, "scope": ["demo_echo"],
+        }]}))
+        echo = EchoBridge(auth, Path(self.temp_dir.name) / "browser.sqlite")
+        m2 = M2Bridge(echo)
+        trust = BrowserTrust(echo, m2)
+        self.app["mac_bridge"], self.app["mac_m2"] = echo, m2
+        self.app["browser_trust"] = trust
+        backend = web.Application()
+        trust.routes(backend)
+        backend.router.add_get("/ws", websocket)
+        for key in ("config_path", "adapter_factory", "semantic_provider", "chat_provider",
+                    "tts_provider", "vad_provider", "agentic"):
+            backend[key] = self.app[key]
+        backend["mac_bridge"], backend["mac_m2"], backend["browser_trust"] = echo, m2, trust
+        native_server = TestServer(backend)
+        await native_server.start_server()
+        self.addAsyncCleanup(native_server.close)
+        self.app["client"] = self.client
+        self.app["agent_backend_url"] = str(native_server.make_url("")).rstrip("/")
+        origin = str(self.server.make_url("")).rstrip("/")
+        async with self.client.ws_connect(self.server.make_url("/agent-ws"),
+                                           headers={"Origin": origin}) as ws:
+            await ws.send_json({"type": "agent.mac.status"})
+            event = await ws.receive_json()
+            binding = echo.bindings[event["session_id"]]
+            binding.device_id, binding.digest = "test-mac", "a" * 64
+            async with self.client.post(self.server.make_url("/api/tools/browser/remember"),
+                headers={"Origin": origin},
+                json={"session_id": binding.session_id, "confirmed": True}) as response:
+                self.assertEqual(response.status, 200, await response.text())
+                token = response.cookies["duplex_browser"].value
+                self.assertTrue(response.cookies["duplex_browser"]["httponly"])
+        for _ in range(50):
+            if binding.closed:
+                break
+            await asyncio.sleep(.01)
+        async with self.client.ws_connect(self.server.make_url("/agent-ws"), headers={
+            "Origin": origin, "Cookie": "duplex_browser=" + token,
+        }) as ws:
+            await ws.send_json({"type": "agent.mac.status"})
+            event = await ws.receive_json()
+            self.assertEqual(event["device_id"], "test-mac")
+            self.assertNotEqual(event["session_id"], binding.session_id)
+
+    async def test_agent_capture_handshake_without_m2_policy(self):
+        async with self.client.ws_connect(self.server.make_url("/ws")) as ws:
+            for payload, paused in [
+                ({"type": "agent.capture.ready", "supported": True}, False),
+                ({"type": "agent.capture.hold"}, True),
+                ({"type": "agent.capture.resume"}, False),
+            ]:
+                await ws.send_json(payload)
+                while True:
+                    event = await asyncio.wait_for(ws.receive_json(), 3)
+                    self.assertNotIn(event["type"], {"error", "chat.error"})
+                    if event["type"] == "agent.mac.m2.status":
+                        break
+                self.assertFalse(event["enabled"])
+                self.assertEqual(event["capture_paused"], paused)
+                self.assertEqual(event["available_tools"], [])
+            await ws.send_json({"type": "agent.mac.status"})
+            while (await asyncio.wait_for(ws.receive_json(), 3))["type"] != "agent.mac.m2.status":
+                pass
+            self.assertFalse(ws.closed)
+
     async def test_page_and_capture_worklet(self):
         async with self.client.get(self.server.make_url("/")) as response:
             html = await response.text()
@@ -258,6 +456,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         for token in ("&lt;s&gt;", "&lt;/s&gt;", "SEMANTIC", "NO_SEMANTIC",
                       "&lt;c&gt;", "&lt;/c&gt;"):
             self.assertIn(token, html)
+
         self.assertIn("if(last.state!==t.previous_state)", html)
         self.assertIn("last=addSegment(t.previous_state)", html)
         self.assertIn("playback barge-in", html)
@@ -300,16 +499,325 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         self.assertIn("fullduplex-pcm-capture", worklet)
 
+    async def test_agent_function_call_round_trip_continues_chat(self):
+        await self.agent_tool_roundtrip()
+
+    async def test_mac_echo_round_trip_continues_same_chat(self):
+        await self.agent_tool_roundtrip(mac=True)
+
+    async def test_mac_timer_v2_round_trip_continues_same_chat(self):
+        await self.agent_tool_roundtrip(mac=True, m2=True)
+
+    async def test_mac_timer_v2_declined_write_never_dispatches(self):
+        await self.agent_tool_roundtrip(mac=True, m2=True, gate="decline")
+
+    async def test_mac_facetime_v2_requires_real_capture_ack(self):
+        await self.agent_tool_roundtrip(mac=True, m2=True, gate="capture")
+
+    async def agent_tool_roundtrip(self, mac=False, m2=False, gate=None):
+        tool_name = ("facetime_call" if gate == "capture" else
+                     "timer_start" if gate == "decline" else "timer_list")
+        tool_args = ({"target": "nobody@example.invalid"} if gate == "capture" else
+                     {"label": "test", "duration_seconds": 10} if gate == "decline" else {})
+        class EndpointVAD:
+            def __init__(self):
+                self.values = iter((True, True, False))
+                self.last_active = False
+
+            def process_base64(self, *_args, **_kwargs):
+                active = next(self.values)
+                stopped = not active and self.last_active
+                self.last_active = active
+                return SimpleNamespace(
+                    is_speech=active,
+                    speech_active=active,
+                    speech_started=False,
+                    speech_stopped=stopped,
+                    speech_probability=.91 if active else .0,
+                )
+
+            def reset(self):
+                pass
+
+        bridge = AgentBridgeChatProvider()
+        peer = None
+        native_server = None
+        if mac:
+            import hashlib
+            from aiohttp import web
+            from mac_tools import CORRELATION, EchoBridge, PARAMETERS, PROTOCOL
+
+            class EchoChatProvider:
+                async def stream_reply(_self, audio_chunks, *, history, prompt, context):
+                    output = await context["agent_tool_handler"]({
+                        "id": "call-echo", "type": "function", "function": {
+                            "name": tool_name if m2 else "demo_echo",
+                            "arguments": json.dumps(tool_args) if m2 else '{"text":"hello"}',
+                        },
+                    })
+                    yield (json.loads(output)["status"] if gate else
+                           "Timers: " + str(len(json.loads(output)["data"]["timers"]))
+                           if m2 else "Echo: " + json.loads(output)["data"]["text"])
+
+            bridge = EchoChatProvider()
+            token = "test-native-device-" + "x" * 40
+            auth = Path(self.temp_dir.name) / "mac-auth.json"
+            auth.touch(mode=0o600)
+            auth.write_text(json.dumps({"version": 1, "devices": [{
+                "device_id": "test-mac", "scope": ["demo_echo"],
+                "token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+            }]}))
+            mac_bridge = EchoBridge(auth, Path(self.temp_dir.name) / "audit.sqlite")
+            self.app["mac_bridge"] = mac_bridge
+            native_app = web.Application()
+            mac_bridge.routes(native_app)
+            if m2:
+                from mac_m2 import M2Bridge, CATALOG, CORRELATION, PROFILE, PROTOCOL
+                policy = Path(self.temp_dir.name) / "m2-policy.json"
+                policy.touch(mode=0o600)
+                policy.write_text(json.dumps({"version": 1, "devices": [{
+                    "device_id": "test-mac", "workspace_id": "test-workspace",
+                    "context_id": "test-context", "scope": [tool_name],
+                }]}))
+                m2_bridge = M2Bridge(mac_bridge, policy)
+                self.app["mac_m2"] = m2_bridge
+                m2_bridge.routes(native_app)
+            native_server = TestServer(native_app)
+            await native_server.start_server()
+            self.addAsyncCleanup(native_server.close)
+        self.app["chat_provider"] = bridge
+        self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+            SemanticRealtimeAdapter(config, provider, vad=EndpointVAD())
+        )
+        async with asyncio.timeout(5):
+            ws = await self.client.ws_connect(self.server.make_url("/ws"))
+            await ws.send_json({
+                "type": "agent.session.update",
+                "instructions": "Use tools for current weather.",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "lookup_weather",
+                        "description": "Look up weather",
+                        "parameters": {"type": "object"},
+                    },
+                }],
+            })
+            self.assertEqual((await ws.receive_json())["type"], "agent.session.updated")
+            if mac:
+                headers = {"Authorization": "Bearer " + token}
+                async with self.client.post(native_server.make_url("/api/tools/pairing"),
+                                            headers=headers, json={}) as response:
+                    pairing = await response.json()
+                await ws.send_json({"type": "agent.mac.bind", "confirmed": True,
+                                    "pairing_code": pairing["pairing_code"]})
+                self.assertFalse((await ws.receive_json())["connected"])
+                if m2:
+                    await ws.send_json({"type": "agent.mac.m2.authorize",
+                                        "scope": [tool_name], "confirmed": True})
+                    event = await ws.receive_json()
+                    while event.get("type") != "agent.mac.m2.status" or not event.get("device_id"):
+                        event = await ws.receive_json()
+                    async with self.client.get(
+                        native_server.make_url("/api/tools/m2/device/binding"),
+                        headers=headers,
+                    ) as response:
+                        discovery = await response.json()
+                    peer = await self.client.ws_connect(
+                        native_server.make_url("/api/tools/m2/bridge"), headers=headers,
+                        params={"binding_session_id": discovery["session_id"],
+                                "binding_revision": discovery["binding_revision"]})
+                else:
+                    peer = await self.client.ws_connect(
+                        native_server.make_url("/api/tools/bridge"), headers=headers)
+                self.addAsyncCleanup(peer.close)
+                manifest = {
+                    "protocol": PROTOCOL, "type": "tools.manifest", "device_id": "test-mac",
+                    "mode": "h20", "mcp_protocol": "2025-11-25",
+                    "tools": [{"name": "demo_echo", "inputSchema": PARAMETERS,
+                               "outputSchema": {"type": "object"}}],
+                }
+                if m2:
+                    manifest.update({
+                        "workspace_id": "test-workspace", "context_id": "test-context",
+                        "profile": PROFILE, "scope": [tool_name], "event_types": [],
+                        "tools": [{key: CATALOG[tool_name][key]
+                                   for key in ("name", "description", "inputSchema", "outputSchema")}],
+                    })
+                await peer.send_json(manifest)
+                self.assertEqual((await peer.receive_json())["type"], "tools.manifest_ack")
+                self.assertTrue((await ws.receive_json())["connected"])
+            await ws.send_json({
+                "type": "configure",
+                "min_speech_duration_ms": 32,
+                "complete_confirmations": 1,
+            })
+            self.assertEqual((await ws.receive_json())["type"], "configured")
+            pcm = base64.b64encode(
+                (np.ones(512, dtype="<i2") * 12000).tobytes()
+            ).decode()
+            payload = {
+                "type": "audio",
+                "audio": pcm,
+                "format": "pcm16",
+                "sample_rate_hz": 16000,
+            }
+            for _ in range(3):
+                await ws.send_json(payload)
+                self.assertEqual((await ws.receive_json())["type"], "transition")
+            self.assertEqual((await ws.receive_json())["type"], "chat.started")
+            function_call = await ws.receive_json()
+            if mac:
+                self.assertEqual(function_call["name"], tool_name if m2 else "demo_echo")
+                await ws.send_json({
+                    "type": "agent.mac.m2.invoke" if m2 else "agent.mac.invoke",
+                    "name": tool_name if m2 else "demo_echo", "call_id": "call-echo",
+                    "arguments": tool_args if m2 else {"text": "hello"}})
+                if gate:
+                    self.assertEqual((await ws.receive_json())["type"], "agent.mac.m2.confirmation")
+                    await ws.send_json({"type": "agent.mac.m2.confirm", "call_id": "call-echo",
+                                        "approved": gate == "capture"})
+                    if gate == "capture":
+                        pause = await ws.receive_json()
+                        self.assertEqual(pause["type"], "agent.capture.pause")
+                        await ws.send_json({"type": "agent.capture.paused",
+                                            "request_id": pause["request_id"], "stopped": False})
+                    result = await ws.receive_json()
+                    self.assertEqual(result["type"], "agent.mac.result")
+                    self.assertEqual(json.loads(result["output"])["status"],
+                                     "failed" if gate == "capture" else "cancelled")
+                    await ws.send_json({"type": "agent.function_call_output", "call_id": "call-echo",
+                                        "output": result["output"]})
+                    self.assertEqual((await ws.receive_json())["type"], "chat.delta")
+                    self.assertEqual((await ws.receive_json())["type"], "chat.done")
+                    self.assertFalse(next(iter(m2_bridge.bindings.values())).calls)
+                    await peer.close()
+                    await ws.close()
+                    return
+                call = await peer.receive_json()
+                while call["type"] == "session.update":
+                    call = await peer.receive_json()
+                self.assertEqual(call["type"], "tool.call")
+                await peer.send_json({
+                    "protocol": PROTOCOL, "type": "tool.result",
+                    **{k: call[k] for k in CORRELATION}, "status": "succeeded",
+                    "summary": "echo", "data": {"timers": []} if m2 else {"text": "hello"},
+                    "error": None, "stale": False,
+                })
+                if m2:
+                    self.assertEqual((await peer.receive_json())["type"], "tool.result_ack")
+                result = await ws.receive_json()
+                self.assertEqual(result["type"], "agent.mac.result")
+                await ws.send_json({
+                    "type": "agent.function_call_output", "call_id": "call-echo",
+                    "output": result["output"],
+                })
+                self.assertEqual((await ws.receive_json())["delta"], "Timers: 0" if m2 else "Echo: hello")
+                self.assertEqual((await ws.receive_json())["type"], "chat.done")
+                await peer.close()
+                await ws.close()
+                await native_server.close()
+                return
+            self.assertEqual(function_call, {
+                "type": "agent.function_call",
+                "turn_id": 3,
+                "call_id": "call-weather",
+                "name": "lookup_weather",
+                "arguments": "{\"city\":\"北京\"}",
+            })
+            await ws.send_json({
+                "type": "agent.function_call_output",
+                "call_id": "call-weather",
+                "output": "{\"condition\":\"sunny\"}",
+            })
+            delta = await ws.receive_json()
+            done = await ws.receive_json()
+            self.assertEqual(delta["type"], "chat.delta")
+            self.assertEqual(delta["delta"], '工具返回：{"condition":"sunny"}')
+            self.assertEqual(done["type"], "chat.done")
+            self.assertEqual(bridge.calls[0]["agent_config"]["instructions"],
+                             "Use tools for current weather.")
+            await ws.close()
+
+    async def test_agent_response_cancel_stops_current_chat(self):
+        class EndpointVAD:
+            def __init__(self):
+                self.values = iter((True, True, False))
+                self.last_active = False
+
+            def process_base64(self, *_args, **_kwargs):
+                active = next(self.values)
+                stopped = not active and self.last_active
+                self.last_active = active
+                return SimpleNamespace(
+                    is_speech=active,
+                    speech_active=active,
+                    speech_started=False,
+                    speech_stopped=stopped,
+                    speech_probability=.91 if active else .0,
+                )
+
+            def reset(self):
+                pass
+
+        blocking = BlockingChatProvider()
+        self.app["chat_provider"] = blocking
+        self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+            SemanticRealtimeAdapter(config, provider, vad=EndpointVAD())
+        )
+        async with asyncio.timeout(5):
+            ws = await self.client.ws_connect(self.server.make_url("/ws"))
+            await ws.send_json({
+                "type": "agent.session.update",
+                "instructions": "Answer directly.",
+                "tools": [],
+            })
+            self.assertEqual((await ws.receive_json())["type"], "agent.session.updated")
+            await ws.send_json({
+                "type": "configure",
+                "min_speech_duration_ms": 32,
+                "complete_confirmations": 1,
+                "retain_interrupted_context": False,
+            })
+            self.assertEqual((await ws.receive_json())["type"], "configured")
+            pcm = base64.b64encode(
+                (np.ones(512, dtype="<i2") * 12000).tobytes()
+            ).decode()
+            payload = {
+                "type": "audio",
+                "audio": pcm,
+                "format": "pcm16",
+                "sample_rate_hz": 16000,
+            }
+            for _ in range(3):
+                await ws.send_json(payload)
+                self.assertEqual((await ws.receive_json())["type"], "transition")
+            self.assertEqual((await ws.receive_json())["type"], "chat.started")
+            self.assertEqual((await ws.receive_json())["type"], "chat.delta")
+            await ws.send_json({"type": "response.cancel"})
+            cancelled = await ws.receive_json()
+            self.assertEqual(cancelled["type"], "chat.cancelled")
+            self.assertEqual(cancelled["reason"], "agent_interrupt")
+            self.assertFalse(cancelled["retained"])
+            await asyncio.wait_for(blocking.cancelled.wait(), 1)
+            await ws.close()
+
     async def test_defaults_reread_local_file_on_every_refresh(self):
         async with self.client.get(self.server.make_url("/defaults")) as response:
             before = await response.json()
         self.settings["config"]["threshold"] = .7
+        self.settings["config"]["history_turns"] = 3
+        self.settings["prompts"]["agent_tool_prompt"] = "Configured tools"
+        self.settings["prompts"]["agent_forced_prompt"] = "Configured forced policy"
         self.settings["prompts"]["chat_prompt"] = "刷新后生效的本地 Chat Prompt"
         self.config_path.write_text(json.dumps(self.settings, ensure_ascii=False), encoding="utf-8")
         async with self.client.get(self.server.make_url("/defaults")) as response:
             after = await response.json()
         self.assertEqual(before["config"]["threshold"], .5)
         self.assertEqual(after["config"]["threshold"], .7)
+        self.assertEqual(after["config"]["history_turns"], 3)
+        self.assertEqual(after["prompts"]["agent_tool_prompt"], "Configured tools")
+        self.assertEqual(after["prompts"]["agent_forced_prompt"], "Configured forced policy")
         self.assertEqual(after["prompts"]["chat_prompt"], "刷新后生效的本地 Chat Prompt")
 
     async def test_invalid_local_file_returns_explicit_error(self):
@@ -417,6 +925,55 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
                 }
                 for payload in audio_payloads
             ))
+            await ws.send_json({"type": "reset"})
+            self.assertEqual((await ws.receive_json())["type"], "reset")
+            await ws.close()
+
+    async def test_chat_retains_latest_ten_turns(self):
+        class EndpointVAD:
+            def __init__(self):
+                self.index = 0
+
+            def process_base64(self, *_args, **_kwargs):
+                self.index += 1
+                active = self.index % 3 != 0
+                return SimpleNamespace(
+                    is_speech=active, speech_active=active,
+                    speech_started=False, speech_stopped=not active,
+                    speech_probability=.91 if active else .0,
+                )
+
+            def reset(self):
+                self.index = 0
+
+        self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+            SemanticRealtimeAdapter(config, provider, vad=EndpointVAD())
+        )
+        async with asyncio.timeout(10):
+            ws = await self.client.ws_connect(self.server.make_url("/ws"))
+            await ws.send_json({"type": "configure", "min_speech_duration_ms": 32})
+            self.assertEqual((await ws.receive_json())["type"], "configured")
+            for index in range(12):
+                pcm = base64.b64encode(
+                    (np.ones(512, dtype="<i2") * (10000 + index)).tobytes()
+                ).decode()
+                for _ in range(3):
+                    await ws.send_json({
+                        "type": "audio", "audio": pcm,
+                        "format": "pcm16", "sample_rate_hz": 16000,
+                    })
+                    self.assertEqual((await ws.receive_json())["type"], "transition")
+                while (await ws.receive_json())["type"] != "chat.done":
+                    pass
+            self.assertEqual([len(call["history"]) for call in self.chat.calls],
+                             list(range(11)) + [10])
+            self.assertEqual(
+                self.chat.calls[-1]["history"],
+                self.chat.calls[-2]["history"][1:] + [{
+                    "audio_wav": self.chat.calls[-1]["history"][-1]["audio_wav"],
+                    "assistant": "你好，这是测试回复。",
+                }],
+            )
             await ws.send_json({"type": "reset"})
             self.assertEqual((await ws.receive_json())["type"], "reset")
             await ws.close()

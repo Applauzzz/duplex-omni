@@ -832,6 +832,23 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ChatProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_payload_keeps_ten_history_turns(self):
+        from semantic_vad import build_chat_messages
+
+        audio = self._pcm_chunk()
+        history = [{
+            "audio_wav": base64.b64encode(audio_chunks_to_wav([audio])).decode(),
+            "assistant": f"reply-{index}",
+        } for index in range(12)]
+        messages = build_chat_messages([audio], history=history, prompt="test", context={})
+        self.assertEqual([row["content"] for row in messages if row["role"] == "assistant"],
+                         [f"reply-{index}" for index in range(2, 12)])
+        self.assertEqual(sum(row["role"] == "user" for row in messages), 11)
+        for limit in (0, 3):
+            messages = build_chat_messages(
+                [audio], history=history, prompt="test", context={"history_turns": limit})
+            self.assertEqual(sum(row["role"] == "assistant" for row in messages), limit)
+
     async def test_chat_audio_is_followed_by_chinese_answer_instruction(self):
         class Response:
             status = 200
