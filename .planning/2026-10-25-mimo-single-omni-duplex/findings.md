@@ -1,5 +1,62 @@
 # Findings & Decisions
 
+## 2026-11-04: turn3 VASD-Only Diagnostic
+- User fixture turn3.wav is1360ms mono PCM16/16kHz. Current config uses
+  chunks200ms, window8000ms, probability0.8/margin1.5/confirmations1.
+- Sequential accumulated prefixes first qualify at0-800ms: raw 有,
+  normalized probability0.952574, logprob margin3.0. Earlier200/400/600ms
+  raw 有 predictions do not pass the configured confidence gates.
+- Artifact workspace/logs/20261104T122421Z_turn3_vasd_2ed381a5 contains
+  raw replies and snapshots. Four requests only; remaining560ms not tested.
+  No AVAD/VAED/Chat/TTS or service/config mutation. VASD checks semantic
+  content, including speech to others under current prompt; it is not the
+  Chat assistant-directed-intent/listening decision.
+
+## 2026-11-04: Plain HTTP WebSocket Origin Fix
+- Actual Mac11:41UTC root/defaults/health200 but /ws403. Plain websocket
+  mistakenly used Mac HTTPS-or-localhost origin policy; no network block proven.
+- Plain path now permits well-formed same-host HTTP/HTTPS, rejects cross-origin.
+  Agent/Mac strict policy unchanged. Focused and live Origin-bearing WS pass.
+- Earlier audio probe had no Origin, missing browser-only admission failure.
+
+## 2026-11-04: New Host
+- Current business IP is28.29.217.68, not28.29.218.56. Default route uses
+  bond1 via28.29.217.65; other28.10.* interfaces are compute fabrics.
+- Initial GPU audit shows all eight H20 free; no MiMo/VAD process found.
+- External CosyVoice29.213.195.135:8100 is healthy from approved host probe.
+- Main config preserves user history_turns30 and latest Chinese chat_prompt.
+  Existing handoff's ten-turn text is historical, not the deployed default.
+- New run20261104T105813Z_intranet_vad_bfvtKZxP readiness and one real voice
+  turn passed: 三加四等于七。/71760bytesPCM. Actual long-answer overlap,
+  remote browser capture/playback and multiuser latency remain unaccepted.
+
+## 2026-11-03: Plain Service Startup Boundary
+- svad_debug_server without --agentic selects plain streaming MiMoChatProvider;
+  root / and /ws don't require Next/SDK, even with proxy routes registered.
+- Primary config lives in experiment directory, not workspace/configs. URLs
+  use CLI flags. Existing entry8080 already provides plain root console.
+- External CosyVoice submit/poll client cannot consume historical local Qwen
+  TTS by URL substitution. Runtime compiled extensions link to sibling sources.
+
+## 2026-11-03: Agent Decode Buffers Before TTS
+- User streaming diagnosis confirmed: AgenticMiMoChatProvider direct/native
+  completions accumulate SSE content then return full text at finish_reason;
+  stream_reply yields only that final text. stream=True is upstream only.
+- Plain MiMoChatProvider yields each SSE content delta. Shared service feeds
+  every yielded delta into IncrementalTextChunker/TTS queue, so TTS pipeline
+  remains incremental but cannot overlap agent decode under current adapter.
+- Restoring streaming must distinguish native tool arguments from user-facing
+  content and preserve listening suppression/cancellation. No runtime edits
+  or reload for user's diagnostic question. Official docs search/open empty.
+
+## 2026-11-02: Result Announcement Is Not Analysis Delivery
+- Current prompt says deliver but does not explicitly forbid asking permission.
+  chat.done marks any non-listening text delivered. Later model history has
+  only audio/assistant, not original background result, causing avoidable reruns.
+- Preserve task question/result as previous-task data in its historical turn,
+  bounded by history_turns, and explicitly require substantive same-turn answer.
+  Semantic delivery remains model behavior, not provable from text length.
+
 ## 2026-11-02: M2 Disconnected Browser Status Failure
 - M2 notify did not catch closed-transport send failures unlike EchoBridge.
   Real07:42UTC traces show ClientConnectionResetError in manifest status
@@ -665,3 +722,14 @@
   were already absent, so no supervisor-reported exit codes are available.
 - Interrupted GPU checker has no discovered completed result. Historical
   passing replay remains the accepted server-side fixture evidence.
+## 2026-11-02 Stage6.1 Review
+- Background results are snapshotted immediately before a new DECODE response,
+  not injected into an in-flight engine prefill. Rejected audio is excluded
+  from result-only model input. No unsolicited speech on completion alone.
+- Existing browser transport cancelMacCalls clears all tool receipts, including
+  reasoning. Explicit server background flag must preserve only reasoning
+  across response interrupt, while disconnect clears every receipt.
+- Official OpenAI search/page retrieval returned no content; pinned SDK local
+  realtimeSession async event handler is evidence, not latest SDK guidance.
+- Results initially marked delivered at chat.done: text handoff, not playback
+  acknowledgment. Full spoken delivery remains a separate acceptance boundary.

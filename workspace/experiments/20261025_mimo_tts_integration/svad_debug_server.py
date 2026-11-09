@@ -11,10 +11,12 @@ import math
 from pathlib import Path
 import time
 import uuid
+from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
 
 from agent_runtime import AgenticMiMoChatProvider
+from background_reasoning import BackgroundReasoning
 from mac_tools import EchoBridge, MacToolError, TOOL as MAC_ECHO_TOOL
 from browser_trust import BrowserTrust, browser_origin
 from mac_m2 import M2Bridge, FUNCTIONS as MAC_M2_FUNCTIONS, WRITES as MAC_M2_WRITES, CALLS as MAC_M2_CALLS
@@ -70,6 +72,8 @@ def load_local_settings(path: Path) -> dict[str, object]:
         "audio_chunk_ms", "tts_enabled", "tts_reg_id", "tts_min_chars",
         "tts_max_chars", "tts_speed", "tts_target_rms",
         "retain_interrupted_context",
+        "history_turns",
+        "background_reasoning",
     }
     semantic_config = {key: value for key, value in raw_config.items() if key not in app_config_names}
     config = SemanticVADConfig.from_mapping({"type": "semantic_vad", **semantic_config})
@@ -84,6 +88,18 @@ def load_local_settings(path: Path) -> dict[str, object]:
         if not isinstance(value, str) or not value.strip() or len(value) > 4096:
             raise ValueError(f"SVAD config prompts.{name} must be a non-empty string of at most 4096 characters")
         prompts[name] = value
+    for name in ("agent_tool_prompt", "agent_forced_prompt", "background_reasoning_prompt"):
+        if name in raw_prompts:
+            value = raw_prompts[name]
+            if not isinstance(value, str) or not value.strip() or len(value) > 16000:
+                raise ValueError(f"SVAD config prompts.{name} must be a non-empty string of at most 16000 characters")
+            prompts[name] = value
+    history_turns = raw_config.get("history_turns", CHAT_HISTORY_TURNS)
+    background_reasoning = raw_config.get("background_reasoning", False)
+    if not isinstance(background_reasoning, bool):
+        raise ValueError("SVAD config background_reasoning must be a boolean")
+    if not isinstance(history_turns, int) or isinstance(history_turns, bool) or not 0 <= history_turns <= 100:
+        raise ValueError("SVAD config history_turns must be an integer within [0, 100]")
     tts_enabled = raw_config.get("tts_enabled", True)
     if not isinstance(tts_enabled, bool):
         raise ValueError("SVAD config tts_enabled must be a boolean")
@@ -125,6 +141,8 @@ def load_local_settings(path: Path) -> dict[str, object]:
             "tts_speed": float(tts_speed),
             "tts_target_rms": float(tts_target_rms),
             "retain_interrupted_context": retain_interrupted_context,
+            "history_turns": history_turns,
+            "background_reasoning": background_reasoning,
             "threshold": config.threshold,
             "prefix_padding_ms": config.prefix_padding_ms,
             "silence_duration_ms": config.silence_duration_ms,
@@ -312,7 +330,16 @@ async def websocket(request):
     origin = None
     if request.headers.get("Origin"):
         try:
-            origin = browser_origin(request)
+            if request.app["agentic"]:
+                origin = browser_origin(request)
+            else:
+                origin = request.headers["Origin"]
+                parsed = urlsplit(origin)
+                if (parsed.scheme not in {"http", "https"}
+                        or parsed.netloc != request.host
+                        or parsed.username or parsed.password
+                        or parsed.path or parsed.query or parsed.fragment):
+                    raise MacToolError("browser_origin_rejected")
         except MacToolError:
             return web.json_response({"error": "browser_origin_rejected"}, status=403)
     ws = web.WebSocketResponse(max_msg_size=2 * 1024 * 1024, heartbeat=20)
@@ -345,6 +372,7 @@ async def websocket(request):
         "tts_speed": float(local_config["tts_speed"]),
         "tts_target_rms": float(local_config["tts_target_rms"]),
         "retain_interrupted_context": bool(local_config["retain_interrupted_context"]),
+        "history_turns": local_config["history_turns"],
     }
     send_lock = asyncio.Lock()
 
@@ -367,6 +395,10 @@ async def websocket(request):
     mac_binding.browser_origin = origin
     m2_approvals = {}
     capture_acks = {}
+    background = BackgroundReasoning(send)
+    background_calls = set()
+    turn_background_result = None
+    turn_result_only = False
 
     async def cancel_chat(reason):
         nonlocal chat_task, chat_turn_id, chat_tts_enabled, chat_text_done, active_response
@@ -405,18 +437,23 @@ async def websocket(request):
         chat_tts_enabled = False
         chat_text_done = False
         retained = False
-        for future in pending_tool_calls.values():
+        for call_id, future in list(pending_tool_calls.items()):
+            if call_id in background_calls:
+                continue
             if not future.done():
                 future.cancel()
-        pending_tool_calls.clear()
-        pending_tool_names.clear()
+            pending_tool_calls.pop(call_id, None)
+            pending_tool_names.pop(call_id, None)
         pending_tool_arguments.clear()
         mac_requested.clear()
         for mac_task in tuple(mac_tasks):
             mac_task.cancel()
         if retained_entry is not None:
             history.append(retained_entry)
-            del history[:-CHAT_HISTORY_TURNS]
+            if response_settings["history_turns"]:
+                del history[:-response_settings["history_turns"]]
+            else:
+                history.clear()
             retained = True
         active_response = None
         if turn_id is not None:
@@ -433,6 +470,8 @@ async def websocket(request):
     async def run_chat(turn_id, audio_chunks, chat_prompt):
         nonlocal chat_text_done, chat_tts_enabled, active_response
         text = ""
+        result = turn_background_result
+        result_only = turn_result_only
 
         async def run_agent_tool(call):
             call_id = call.get("id")
@@ -481,7 +520,8 @@ async def websocket(request):
                 "request_id": f"{session_id}-{turn_id}-tts",
             },
         ) if response_settings["tts_enabled"] else None
-        audio_wav = base64.b64encode(audio_chunks_to_wav(audio_chunks)).decode("ascii")
+        audio_wav = (base64.b64encode(audio_chunks_to_wav(audio_chunks)).decode("ascii")
+                     if audio_chunks else None)
         video_frames = video_chunks_to_jpeg_sequence(audio_chunks)
         active_response = {
             "turn_id": turn_id,
@@ -602,6 +642,15 @@ async def websocket(request):
                     "video_frames": video_frames,
                     "agent_config": agent_config,
                     "agent_tool_handler": run_agent_tool,
+                    "history_turns": response_settings["history_turns"],
+                    "background_reasoning_result": result,
+                    "background_result_only": result_only,
+                    "background_reasoning_prompt": prompts.get("background_reasoning_prompt", ""),
+                    "background_reasoning_handler": (
+                        lambda call: background.start(call, run_background_tool)
+                    ) if local_config["background_reasoning"] and request.app["agentic"] else None,
+                    **{key: prompts[key] for key in ("agent_tool_prompt", "agent_forced_prompt")
+                       if key in prompts},
                 },
             ):
                 text += delta
@@ -622,11 +671,18 @@ async def websocket(request):
                         await tts_queue.put(chunk)
                     await tts_queue.put(None)
             history_entry = {"audio_wav": audio_wav, "assistant": text}
+            if result:
+                history_entry["background_reasoning_result"] = result
             if video_frames is not None:
                 history_entry["video_frames"] = video_frames
             history.append(history_entry)
-            del history[:-CHAT_HISTORY_TURNS]
+            if response_settings["history_turns"]:
+                del history[:-response_settings["history_turns"]]
+            else:
+                history.clear()
             await send({"type": "chat.done", "turn_id": turn_id, "text": text})
+            if result and text.strip().lower() != "listening":
+                await background.delivered(result["task_id"])
             LOG.info(
                 "agent_chat_done session=%s turn=%s text_chars=%s tts=%s",
                 session_id,
@@ -669,6 +725,9 @@ async def websocket(request):
 
     def start_chat(turn_id, audio_chunks):
         nonlocal chat_turn_id, chat_task, chat_tts_enabled, chat_text_done
+        nonlocal turn_background_result, turn_result_only
+        turn_background_result = background.result()
+        turn_result_only = not audio_chunks and bool(turn_background_result)
         chat_turn_id = turn_id
         chat_tts_enabled = response_settings["tts_enabled"]
         chat_text_done = False
@@ -679,6 +738,26 @@ async def websocket(request):
         )
         chat_task.add_done_callback(
             lambda _task: asyncio.create_task(maybe_start_pending()))
+
+    async def run_background_tool(call):
+        originating_turn = chat_turn_id
+        call_id = call["id"]
+        future = asyncio.get_running_loop().create_future()
+        background_calls.add(call_id)
+        pending_tool_calls[call_id] = future
+        pending_tool_names[call_id] = "consult_reasoning_model"
+        try:
+            await send({"type": "agent.function_call", "turn_id": originating_turn,
+                        "background": True,
+                        "call_id": call_id, "name": "consult_reasoning_model",
+                        "arguments": call["function"]["arguments"]})
+            return await asyncio.wait_for(future, 120)
+        finally:
+            pending_tool_calls.pop(call_id, None)
+            pending_tool_names.pop(call_id, None)
+            if len(background_calls) > 32:
+                background_calls.intersection_update(pending_tool_calls)
+                background_calls.add(call_id)
 
     async def forget_browser():
         await cancel_chat("browser_authorization_revoked")
@@ -692,8 +771,9 @@ async def websocket(request):
             if key not in payload:
                 continue
             value = payload[key]
-            if not isinstance(value, str) or not value.strip() or len(value) > 4096:
-                raise ValueError(f"{key} must be a non-empty string of at most 4096 characters")
+            limit = 16000 if key.startswith("agent_") or key == "background_reasoning_prompt" else 4096
+            if not isinstance(value, str) or not value.strip() or len(value) > limit:
+                raise ValueError(f"{key} must be a non-empty string of at most {limit} characters")
             prompts[key] = value
     try:
         async for frame in ws:
@@ -743,6 +823,9 @@ async def websocket(request):
                     "retain_interrupted_context",
                     local_config["retain_interrupted_context"],
                 )
+                history_turns = payload.get("history_turns", local_config["history_turns"])
+                if not isinstance(history_turns, int) or isinstance(history_turns, bool) or not 0 <= history_turns <= 100:
+                    raise ValueError("history_turns must be an integer within [0, 100]")
                 if not isinstance(tts_enabled, bool):
                     raise ValueError("tts_enabled must be a boolean")
                 if not isinstance(tts_reg_id, str) or not tts_reg_id.strip() or len(tts_reg_id) > 100:
@@ -775,6 +858,7 @@ async def websocket(request):
                     "tts_speed": float(tts_speed),
                     "tts_target_rms": float(tts_target_rms),
                     "retain_interrupted_context": retain_interrupted_context,
+                    "history_turns": history_turns,
                 })
                 adapter = request.app["adapter_factory"](
                     config,
@@ -997,6 +1081,8 @@ async def websocket(request):
                 output = payload.get("output")
                 future = pending_tool_calls.get(call_id)
                 if future is None or future.done():
+                    if call_id in background_calls:
+                        continue
                     raise ValueError(f"Unknown agent tool call: {call_id!r}")
                 if not isinstance(output, str):
                     raise ValueError("agent tool output must be a string")
@@ -1017,6 +1103,7 @@ async def websocket(request):
                     await maybe_start_pending()
                 continue
             if event_type == "reset":
+                await background.close()
                 await cancel_chat("fsm_reset")
                 if adapter is not None:
                     adapter.reset()
@@ -1096,11 +1183,15 @@ async def websocket(request):
                     })
                 else:
                     start_chat(sequence, output.decode_audio)
+            elif (background.ready() and output.reject
+                  and not (chat_task and not chat_task.done()) and not tts_playback_active):
+                start_chat(sequence, ())
     except (ValueError, TypeError, KeyError, RuntimeError, OverflowError) as error:
         LOG.exception("SVAD debug session %s failed", session_id)
         if not ws.closed:
             await ws.send_json({"type": "error", "message": str(error)[:500]})
     finally:
+        await background.close()
         await mac_bridge.close_session(mac_binding)
         await mac_m2.close_session(m2_binding)
         for task in mac_tasks:

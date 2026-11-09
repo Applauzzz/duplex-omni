@@ -42,6 +42,116 @@ class Client:
 
 
 class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_background_call_returns_placeholder_without_waiting(self):
+        call = {"index": 0, "id": "reason-1", "type": "function",
+                "function": {"name": "consult_reasoning_model",
+                             "arguments": '{"task":"question","context":null}'}}
+        client = Client([
+            [{"choices": [{"delta": {"tool_calls": [call]}, "finish_reason": "tool_calls"}]}],
+            [{"choices": [{"delta": {"content": "我正在分析，稍后告诉你。"}, "finish_reason": "stop"}]}],
+        ])
+        calls = []
+        async def start(value):
+            calls.append(value)
+            return '{"status":"background_pending"}'
+        context = {
+            "agent_config": {"instructions": "test", "tools": [
+                {"type": "function", "function": {"name": "consult_reasoning_model"}}]},
+            "agent_tool_handler": lambda _call: None,
+            "background_reasoning_handler": start,
+            "background_reasoning_prompt": "background policy",
+        }
+        output = [part async for part in AgenticMiMoChatProvider(
+            client, "http://mimo").stream_reply([self.audio()], history=[], prompt="test", context=context)]
+        self.assertEqual(output, ["我正在分析，稍后告诉你。"])
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("tools", client.payloads[1][0])
+
+    async def test_ready_result_only_has_no_rejected_audio_or_tools(self):
+        client = Client([[{"choices": [{"delta": {"content": "之前问题的结果。"},
+                                       "finish_reason": "stop"}]}]])
+        context = {
+            "agent_config": {"instructions": "test", "tools": self.tools()},
+            "agent_tool_handler": lambda _call: None,
+            "background_result_only": True,
+            "background_reasoning_result": {"task_id": "id", "question": "old", "result": "answer"},
+        }
+        output = [part async for part in AgenticMiMoChatProvider(
+            client, "http://mimo").stream_reply([], history=[], prompt="test", context=context)]
+        self.assertEqual(output, ["之前问题的结果。"])
+        payload = client.payloads[0][0]
+        self.assertNotIn("tools", payload)
+        self.assertEqual(len(payload["messages"]), 2)
+        self.assertIn('"question": "old"', payload["messages"][-1]["content"])
+
+    async def test_ready_result_combines_current_audio_and_old_question(self):
+        call = {"index": 0, "id": "weather", "type": "function",
+                "function": {"name": "weather_get", "arguments": "{}"}}
+        client = Client([
+            [{"choices": [{"delta": {"tool_calls": [call]}, "finish_reason": "tool_calls"}]}],
+            [{"choices": [{"delta": {"content": "当前回答，加先前分析。"},
+                                       "finish_reason": "stop"}]}]])
+        tools = [{"type": "function", "function": {"name": name}}
+                 for name in ("weather_get", "consult_reasoning_model")]
+        async def execute(_call):
+            context["agent_config"]["tools"] = tools
+            return "weather result"
+        context = {
+            "agent_config": {"instructions": "test", "tools": tools},
+            "agent_tool_handler": execute,
+            "background_reasoning_result": {"task_id": "id", "question": "old", "result": "answer"},
+        }
+        output = [part async for part in AgenticMiMoChatProvider(
+            client, "http://mimo").stream_reply([self.audio()], history=[], prompt="test", context=context)]
+        self.assertEqual(output, ["当前回答，加先前分析。"])
+        messages = client.payloads[0][0]["messages"]
+        self.assertEqual(messages[1]["content"][0]["type"], "input_audio")
+        self.assertIn('"question": "old"', messages[2]["content"])
+        for payload, _headers in client.payloads:
+            self.assertEqual([tool["function"]["name"] for tool in payload["tools"]],
+                             ["weather_get"])
+            self.assertIn("不得只宣布", payload["messages"][0]["content"])
+            self.assertIn("不需要额外确认", payload["messages"][0]["content"])
+
+    async def test_followup_reuses_historical_background_result(self):
+        client = Client([[{"choices": [{"delta": {"content": "已有分析的详细讲解。"},
+                                       "finish_reason": "stop"}]}]])
+        async def execute(_call):
+            self.fail("followup should reuse supplied result")
+        result = {"task_id": "id", "question": "article", "result": "actual analysis"}
+        context = {"agent_config": {"instructions": "test", "tools": self.tools()},
+                   "agent_tool_handler": execute}
+        output = [part async for part in AgenticMiMoChatProvider(
+            client, "http://mimo").stream_reply(
+                [self.audio()], history=[{"assistant": "要不要听？",
+                                         "background_reasoning_result": result}],
+                prompt="test", context=context)]
+        self.assertEqual(output, ["已有分析的详细讲解。"])
+        messages = client.payloads[0][0]["messages"]
+        self.assertIn("不重新提交同一个分析任务", messages[0]["content"])
+        self.assertIn("actual analysis", messages[1]["content"])
+        self.assertEqual(messages[2]["role"], "assistant")
+
+    async def test_mixed_background_tool_calls_rejected_before_execution(self):
+        calls = [{"index": index, "id": f"call-{index}", "type": "function",
+                  "function": {"name": name, "arguments": "{}"}}
+                 for index, name in enumerate(("consult_reasoning_model", "search_web"))]
+        client = Client([[{"choices": [{"delta": {"tool_calls": calls},
+                                       "finish_reason": "tool_calls"}]}]])
+        async def start(_call):
+            self.fail("must not dispatch mixed calls")
+        context = {
+            "agent_config": {"instructions": "test", "tools": []},
+            "agent_tool_handler": lambda _call: None,
+            "background_reasoning_handler": start,
+        }
+        context["agent_config"]["tools"] = [
+            {"type": "function", "function": {"name": name}}
+            for name in ("consult_reasoning_model", "search_web")]
+        with self.assertRaisesRegex(RuntimeError, "only tool call"):
+            _ = [part async for part in AgenticMiMoChatProvider(
+                client, "http://mimo").stream_reply([self.audio()], history=[], prompt="test", context=context)]
+
     @staticmethod
     def audio():
         return {
@@ -75,6 +185,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "agent_config": {"instructions": "Use tools only when needed.",
                              "tools": self.tools()},
             "agent_tool_handler": lambda _call: None,
+            "agent_tool_prompt": "Configured tool policy.",
+            "agent_forced_prompt": "Configured forced policy.",
         }
         result = [item async for item in AgenticMiMoChatProvider(
             client, "http://mimo").stream_reply(
@@ -88,6 +200,9 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["function"]["name"] for item in payload["tools"]],
                          ["search_web", "get_current_datetime"])
         self.assertNotIn("response_format", payload)
+        self.assertEqual(payload["messages"][0]["content"],
+                         "Base prompt\n\nAgent instructions:\nConfigured tool policy."
+                         "\n\nConfigured forced policy.")
 
     async def test_fragmented_native_call_executes_and_continues(self):
         fragments = [

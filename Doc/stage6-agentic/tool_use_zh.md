@@ -401,6 +401,28 @@ Stage 6 已实现暂停握手和匹配 ACK 阻断；尚未完成真实浏览器 
 
 ## 14A. 本次 M2 接入与部署
 
+### All-in-One 对话配置
+
+统一编辑 `workspace/experiments/20261025_mimo_tts_integration/svad_config.json`：
+
+| 配置键 | 用途 |
+| --- | --- |
+| `config.history_turns` | 保留历史轮数，默认 10，允许 0 到 100；0 关闭历史 |
+| `prompts.chat_prompt` | 小微身份、回复风格、打断处理 |
+| `prompts.agent_tool_prompt` | 基础工具及 Mac 工具使用规则 |
+| `prompts.agent_forced_prompt` | 最后追加的强制交互策略 |
+| `prompts.vasd_sem_prompt` / `prompts.vaed_prompt` | 独立 VAD 分类提示词 |
+
+服务端最终生成 Prompt 为 `chat_prompt + Agent instructions:
+agent_tool_prompt + agent_forced_prompt`。网页 SDK instructions 仅在旧配置
+未提供 `agent_tool_prompt` 时作为兼容回退，不覆盖新统一配置。
+同样，旧配置缺少强制 Prompt 或历史轮数时保留原默认行为。
+保存 JSON 后，已连接会话先 Disconnect，再 Connect，以重新读取配置；
+无需重启模型/服务或重建 Mac App。普通 SVAD 页面也可通过现有设置事件
+应用已提供的配置项。工具 schema、设备认证和权限 policy 不属于提示词，
+仍独立校验，修改 Prompt 不能绕过工具授权。
+历史轮数较大会增加原始音视频上下文与推理负载；不要把 100 当作推荐值。
+
 完整默认生成提示词和工具发现链路见
 [prompt_snapshot_20261102.md](prompt_snapshot_20261102.md)。这是源码重建快照，
 不是当前浏览器会话抓包；工具通过独立 tools 字段注册，不仅由提示词指定。
@@ -625,3 +647,13 @@ authorization_revision、call_id 和 invocation_id。先持久化再派发。
 上表“外部库”根目录为 `/mnt/geminihzceph/user_whynotzhliu/Omni/h20_duplex_fc_dev`；
 常规 `webapp` 位于 `we_duplex_demo/L20_mac_demo_20260915/SSL-PVAD/webapp`。
 精确 schema 以核对的源码及协商 profile 为准，本文是使用指南，不是 wire schema。
+## Stage6.1 后台分析策略（2026-11-02）
+
+`consult_reasoning_model` 在 `config.background_reasoning=true` 时改为单任务
+后台执行；普通工具仍阻塞。当轮口语占位，结果在后续生成轮次与原问题一起
+进入上下文；拒识当前输入时可以只交付原任务。页面显示黄/绿/红任务状态。
+SDK 执行路径不变，对话打断保留后台回执，断开/Reset 不恢复任务。
+完整调用格式、prompt 约束、结果注入时点及验收边界：
+[Stage6.1 中文链路](stage6_1_nonblocking_zh.md)。
+就绪轮直接回答原问题，不再询问要不要听；返回资料保留在对应历史轮内，
+供后续展开复用，避免把同一分析重复发给 reasoning。

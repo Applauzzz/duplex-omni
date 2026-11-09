@@ -844,6 +844,10 @@ class ChatProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["content"] for row in messages if row["role"] == "assistant"],
                          [f"reply-{index}" for index in range(2, 12)])
         self.assertEqual(sum(row["role"] == "user" for row in messages), 11)
+        for limit in (0, 3):
+            messages = build_chat_messages(
+                [audio], history=history, prompt="test", context={"history_turns": limit})
+            self.assertEqual(sum(row["role"] == "assistant" for row in messages), limit)
 
     async def test_chat_audio_is_followed_by_chinese_answer_instruction(self):
         class Response:

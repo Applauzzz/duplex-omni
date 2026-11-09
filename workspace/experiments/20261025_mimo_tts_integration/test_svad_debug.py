@@ -10,7 +10,7 @@ import unittest
 
 import cv2
 import numpy as np
-from aiohttp import ClientSession
+from aiohttp import ClientSession, WSServerHandshakeError
 from aiohttp.test_utils import TestServer
 
 from semantic_vad import (
@@ -213,6 +213,93 @@ class FailingTTSProvider(TTSProvider):
 
 
 class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_background_result_survives_interrupt_and_rejected_input(self):
+        from semantic_vad import InputEvent
+
+        class Adapter:
+            last_avad = {}
+            controller = SimpleNamespace(fsm=SimpleNamespace(candidate_audio=[], turn_audio=[]))
+            def __init__(self):
+                self.first = True
+                self.count = 0
+            async def process_append(self, append, **_kwargs):
+                self.count += 1
+                first, self.first = self.first, False
+                return SimpleNamespace(
+                    interrupt=False, reject=self.count == 2,
+                    event=InputEvent.DECODE if self.count != 2 else InputEvent.NO_OP,
+                    decode_audio=(append,) if self.count != 2 else (),
+                    as_log=lambda: {},
+                ), []
+            def close(self):
+                pass
+
+        class Chat:
+            async def stream_reply(_self, audio_chunks, *, history, prompt, context):
+                if context["background_reasoning_result"]:
+                    self.assertTrue(context["background_result_only"])
+                    self.assertEqual(audio_chunks, ())
+                    self.assertEqual(context["background_reasoning_result"]["result"], "real result")
+                    yield "先前问题的分析结论是实际结果。"
+                elif history and history[-1].get("background_reasoning_result"):
+                    self.assertEqual(history[-1]["background_reasoning_result"]["result"], "real result")
+                    yield "复用先前结果继续讲解。"
+                else:
+                    await context["background_reasoning_handler"]({
+                        "id": "background-call", "function": {
+                            "name": "consult_reasoning_model",
+                            "arguments": '{"task":"original question","context":null}',
+                        }})
+                    yield "稍后告诉你。"
+
+        self.settings["config"]["background_reasoning"] = True
+        self.config_path.write_text(json.dumps(self.settings), encoding="utf-8")
+        self.app["agentic"] = True
+        self.app["chat_provider"] = Chat()
+        self.app["adapter_factory"] = lambda *_args, **_kwargs: Adapter()
+        async with asyncio.timeout(5):
+            ws = await self.client.ws_connect(self.server.make_url("/ws"))
+            await ws.send_json({"type": "agent.session.update", "instructions": "test", "tools": []})
+            await ws.receive_json()
+            await ws.send_json({"type": "configure"})
+            while (await ws.receive_json())["type"] != "configured":
+                pass
+            audio = {"type": "audio", "audio": base64.b64encode(b"\1\0" * 512).decode(),
+                     "format": "pcm16", "sample_rate_hz": 16000}
+            await ws.send_json(audio)
+            call_id = None
+            placeholder_done = False
+            while True:
+                event = await ws.receive_json()
+                if event["type"] == "agent.function_call":
+                    call_id = event["call_id"]
+                if event["type"] == "chat.done":
+                    placeholder_done = True
+                if placeholder_done and call_id:
+                    break
+            await ws.send_json({"type": "response.cancel"})
+            await ws.send_json({"type": "agent.function_call_output", "call_id": call_id,
+                                "output": "real result"})
+            while True:
+                event = await ws.receive_json()
+                if event["type"] == "agent.background.status" and event["status"] == "ready":
+                    break
+                self.assertNotEqual(event["type"], "error")
+            await ws.send_json(audio)
+            while (await ws.receive_json())["type"] != "chat.done":
+                pass
+            event = await ws.receive_json()
+            self.assertEqual(event["type"], "agent.background.status")
+            self.assertEqual(event["status"], "delivered")
+            await ws.send_json(audio)
+            while True:
+                event = await ws.receive_json()
+                self.assertNotEqual(event["type"], "agent.function_call")
+                if event["type"] == "chat.done":
+                    self.assertEqual(event["text"], "复用先前结果继续讲解。")
+                    break
+            await ws.close()
+
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.config_path = Path(self.temp_dir.name) / "svad_config.json"
@@ -266,6 +353,22 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         await self.server.close()
         self.temp_dir.cleanup()
+
+    async def test_plain_intranet_origin_and_agent_https_boundary(self):
+        headers = {"Host": "28.29.217.68:8080", "Origin": "http://28.29.217.68:8080"}
+        async with self.client.ws_connect(self.server.make_url("/ws"), headers=headers) as ws:
+            await ws.send_json({"type": "configure", "tts_enabled": False})
+            event = await asyncio.wait_for(ws.receive_json(), 3)
+            self.assertEqual(event["type"], "configured")
+        for origin in ("http://evil.example", "null", "http://28.29.217.68:8080/path"):
+            with self.assertRaises(WSServerHandshakeError) as failure:
+                await self.client.ws_connect(
+                    self.server.make_url("/ws"), headers={**headers, "Origin": origin})
+            self.assertEqual(failure.exception.status, 403)
+        self.app["agentic"] = True
+        with self.assertRaises(WSServerHandshakeError) as failure:
+            await self.client.ws_connect(self.server.make_url("/ws"), headers=headers)
+        self.assertEqual(failure.exception.status, 403)
 
     async def test_browser_remember_through_entry_proxy(self):
         from aiohttp import web
@@ -703,12 +806,18 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         async with self.client.get(self.server.make_url("/defaults")) as response:
             before = await response.json()
         self.settings["config"]["threshold"] = .7
+        self.settings["config"]["history_turns"] = 3
+        self.settings["prompts"]["agent_tool_prompt"] = "Configured tools"
+        self.settings["prompts"]["agent_forced_prompt"] = "Configured forced policy"
         self.settings["prompts"]["chat_prompt"] = "刷新后生效的本地 Chat Prompt"
         self.config_path.write_text(json.dumps(self.settings, ensure_ascii=False), encoding="utf-8")
         async with self.client.get(self.server.make_url("/defaults")) as response:
             after = await response.json()
         self.assertEqual(before["config"]["threshold"], .5)
         self.assertEqual(after["config"]["threshold"], .7)
+        self.assertEqual(after["config"]["history_turns"], 3)
+        self.assertEqual(after["prompts"]["agent_tool_prompt"], "Configured tools")
+        self.assertEqual(after["prompts"]["agent_forced_prompt"], "Configured forced policy")
         self.assertEqual(after["prompts"]["chat_prompt"], "刷新后生效的本地 Chat Prompt")
 
     async def test_invalid_local_file_returns_explicit_error(self):

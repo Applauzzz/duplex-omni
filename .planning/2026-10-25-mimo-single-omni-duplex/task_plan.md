@@ -7,6 +7,38 @@ and Qwen3-TTS CustomVoice as the initial independent speech renderer.
 Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
+November9 user authorizes current feature/stage6-mac-tools checkpoint commit
+and push (framework first, parent gitlink second); user will merge main.
+Keep unfinished audio/playback/quality gates open and all live services intact.
+Exclude tmp draft, historical wx_tts_ref.py, credentials and raw run artifacts.
+
+November4 plain VAD deployed on28.29.217.68:8080, run
+20261104T105813Z_intranet_vad_bfvtKZxP. TP4/EP GPU0-3 MiMo loopback8090,
+external CosyVoice8100, history30/current Chinese prompt preserved.
+Health/routes/defaults/WS and real speech->七/PCM passed. Services retained.
+Next user Mac intranet reachability/capture/playback acceptance, then warm
+latency/long-reply overlap if requested. No agentic enable or code refactor.
+Historical host PIDs are not current owners.
+
+November2 direct-delivery feedback correction: require substantive analysis in
+ready turn, no "want to hear?" confirmation. Preserve background result in
+bounded turn history for followup reuse. Focused5/5 and real MiMo two-turn text
+probe pass (no repeated reasoning); reload application then user audio trial.
+No keyword gate, forced semantic classifier, commit or push.
+
+November2 Stage6.1 implemented and deployed in run20261102T165557Z_mac_echo_735385b6:
+focused Python8/SDK2/tsc pass, current defaults enable background reasoning
+and10-turn history; health/M2 mapping/page200 pass. Next manually reconnect
+browser and accept real MiMo placeholder, intervening ordinary tool, combined
+answer and rejected-input delivery; screenshots/playback remain unaccepted.
+No push requested. The implementation scope supersedes historical next actions:
+single connection-scoped nonblocking consult_reasoning_model, immediate
+placeholder, next-response result injection, rejected-input result-only path,
+and yellow/green task status. Preserve ordinary blocking tools and native
+parser. Verify SDK receipt survival across interrupt, strict arguments,
+focused tests (at most5/module), Chinese documentation, then application reload.
+Keep all-in-one config edits and feature/stage6-mac-tools branch; no push requested.
+
 Real browser30s timer_start succeeded and correlated timer.finished persisted
 November1 at15:56UTC. Mac M2 now negotiated selected13 tools in that session;
 accept timer slice only, not all tool groups. Next verify user's Mac countdown
@@ -121,6 +153,16 @@ Basic integration checkpoint accepted for publication by user; runtime stopped
 by user request. Publication does not close the broader acceptance gates.
 
 ## Phases
+
+### Stage 6.1: Nonblocking Reasoning
+- [x] Implement connection-scoped single job and next-turn result snapshot
+- [x] Implement placeholder and parsed sole-reasoning invocation checks
+- [x] Verify service rejection/result-only and cancellation lifecycle
+- [x] Verify real SDK concurrent ordinary tool and background receipt survival
+- [x] Complete Chinese policy/flow/config and limitations documentation
+- [x] Reload application and verify readiness; real browser/model acceptance separate
+- [ ] Accept real model/browser placeholder, ordinary tool and result delivery
+- **Status:** in_progress
 
 ### Phase 1: Architecture Discovery and Durable Planning
 - [x] Restore/check existing plans and Git worktree

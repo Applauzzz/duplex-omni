@@ -1,5 +1,274 @@
 # Progress Log
 
+## 2026-11-09: User-Requested Mac Tools Branch Publication
+- Publish current parent/framework feature/stage6-mac-tools only; user will
+  merge main manually. Preserve running services and dirty work; no merge main.
+- Scope: Stage6.1 reasoning/background transport/status, same-turn delivery
+  and history reuse, unified prompts/history config, plain Origin fix,
+  related tests and Chinese documentation/planning. Exclude untracked tmp
+  handwritten draft and historical wx_tts_ref.py; preserve both locally.
+  Credentials/.env.local, private Mac identity and raw logs remain excluded.
+- November4 frontend restore succeeded in exclusive
+  20261104T124240Z_next_restore_f0698424, npm child2714197, Next ready,
+  /agent200, VAD200 and agent MiMo/TTS=true. Additional asset/WS probe was
+  interrupted by user and is not counted as accepted. No service restart now.
+- Prepublication verification uses focused cases, <=5/module, current
+  interpreter/import roots; check upstream before push, framework first,
+  then parent gitlink/application/docs. No force push or main integration.
+- Fresh env.sh + omni + experiment/current runtime/vllm-omni PYTHONPATH
+  verified sys.executable and service import roots. python -B -m unittest
+  selected12 passed1.195s: background3, agent5, semantic history1, service3
+  including actual local WS cancellation/result/rejection and Origin boundary.
+  Existing aiohttp warnings retained. No GPU/model requests.
+- env.sh default liu Node: two separate node --experimental-strip-types
+  --test selections passed (background receipt, ordinary interruption);
+  tsc --noEmit --incremental false passed. Module-type warning unchanged.
+- First github_env-only fetch stalled, stopped owned git requests; full
+  env.sh + bounded fetch succeeded for both repositories, upstream0/0.
+  Sandbox env setup warnings require approved initialization; ignore check
+  initially used parent path into submodule, corrected submodule-relative.
+  Scoped credential scan no matches; both diff checks pass; .env.local and
+  raw logs verified ignored.
+- Framework57592f9 committed and pushed successfully to
+  origin/feature/stage6-mac-tools. Parent checkpoint will include this gitlink.
+  Publication is a checkpoint, not closure of remaining audio/quality gates.
+
+## 2026-11-04: Returned Localhost Host Agent Frontend Failure
+- Current host is28.29.218.56; shared earlier28.29.217.68 deployment records
+  are another host, not current ownership. Explicit original plan pin used.
+  Parent/framework dirty changes preserved; engine submodules clean.
+- Existing MiMo2301222, agent8081 child2606291, plain entry8080 child2606293.
+  Agent health MiMo/TTS=true. GET8080/agent500; loopback3000 refuses connection.
+  entry.log in20261102T175333Z_mac_echo_5e222427 confirms ClientConnectorError
+  targeting127.0.0.1:3000. No frontend listener despite stale process names.
+- Scope: restore only Next frontend using existing dependencies/.env.local,
+  exclusive launch/log directory; preserve model, VAD, agent and Mac state.
+  Initial sandbox proc symlinks denied; approved retry found application logs.
+  Guessed integration start/service globs absent; actual launch_mac_echo.py
+  covers only8080/8081, not Next. No dependency reinstall or source patch needed.
+- First restore attempt exited1: omni environment has no node/npm on PATH;
+  no child started. Preserve failed run20261104T124137Z_next_restore_2f4c2b76.
+  Existing liu/bin contains node/npm; retry with that bin on process-local PATH.
+
+## 2026-11-04: Temporary turn3 VASD-Only Replay
+- Scope before test: read user turn3.wav and current svad_config.json; use
+  current MiMoSemanticVADProvider on existing loopback8090, no restart/config
+  changes, Chat/VAED/TTS, browser connection or broad regression suite.
+- env.sh + omni verified interpreter and current semantic_vad.py import.
+  Fixture is mono PCM16/16000Hz,21760frames/1360ms. Current chunks200ms,
+  VASD window8000ms, probability0.8/margin1.5/confirmations1.
+- Sequential accumulated-prefix VASD-only diagnostic, stop at first accepted
+  semantic result. This bypasses AVAD and is not an exact browser/FSM replay;
+  shared model requests may briefly consume resources. Preserve exclusive
+  timestamped artifacts and source/config hashes, no existing outputs replaced.
+- Executed env.sh + conda activate omni + experiment PYTHONPATH +
+  python -B /tmp/probe_turn3_vasd.py with network approval; finite session14434
+  exited0. Artifact: workspace/logs/20261104T122421Z_turn3_vasd_2ed381a5.
+  Includes manifest/source/config/provider/probe hashes, config snapshot,
+  raw HTTP responses, four chunk decisions and summary.
+- Accumulated0-200/400/600ms all output 有 but fail configured gates:
+  probabilities0.622459/0.679179/0.705785, margins0.5/0.75/0.875.
+  Accumulated0-800ms outputs 有, probability0.952574/margin3.0,
+  confirmations1; first semantic admission at800ms of input audio.
+  Remaining560ms intentionally untested after admission. Latencies
+  65.67/48.25/47.87/53.80ms are request times, not audio arrival times.
+- Model /health HTTP200 before/after and config bytes unchanged. No service
+  signals, application connections, Chat/VAED/TTS requests or code edits.
+  This proves VASD-only semantic admission, not assistant-directed intent
+  or a full AVAD/FSM end-to-end admission result.
+
+## 2026-11-04: Browser WebSocket HTTP Origin Rejection
+- User browser root/defaults/health200 reaches current server;11:41UTC
+  /ws attempts return403. Service health remains MiMo/TTS=true.
+- Root cause: websocket applies Mac browser_origin HTTPS/localhost policy even
+  in ordinary VAD mode. Prior live probe omitted Origin and missed this gate.
+- Scope before edits: plain VAD permits well-formed same-host HTTP/HTTPS
+  Origin; keep cross-origin rejection and unchanged strict agent/Mac policy.
+  One focused WS test covers plain admission, hostile Origin and agent HTTPS
+  rejection; then reload only verified UI supervisor8212, preserve MiMo/TTS.
+- env.sh + omni verified current service import; focused one WS test passed
+ 0.623s (same-host HTTP configure, three invalid Origins403, agent HTTP403).
+  Existing aiohttp warnings retained; no broad suite.
+- Verified supervisor8212/child8467 against launch metadata, approved SIGINT;
+  old service46600 exited0. Reload attempt intranet02 PTY91556/child35622
+  in same run with exclusive new logs. Model/TTS untouched.
+- Finite /tmp/probe_vad_origin.py exited0: real same-Origin WS configured,
+  hostile Origin403; health MiMo/TTS=true10.8ms. Browser retry remains user
+  acceptance. git diff --check passed, no commits/push.
+
+## 2026-11-04: New Host Intranet VAD Deployment
+- Scope before startup: ordinary VAD/MiMo/CosyVoice only, no agentic mode,
+  branch switch, dependency reinstall or changes to existing prompts/history.
+- Selected existing plan explicitly; parent feature/stage6-mac-tools dirty
+  changes preserved. vllm-src and vllm-omni worktrees are clean.
+- hostname -I and /proc/net/route identify business interface28.29.217.68;
+  eight H20 GPUs have0MiB and no matching model/application process exists.
+- ip and ss are unavailable; use /proc networking and approved bind probes.
+  Sandbox external TTS curl failed7; approved retry returned healthy200.
+- env.sh inside sandbox reports read-only SSH/setup warnings; initialization
+  and import checks will be repeated with approval for the serving process.
+- Planned exclusive new run, TP4/EP GPU0-3 MiMo loopback8090 and ordinary
+  VAD on28.29.217.68:8080 with main config history_turns30 and current prompt.
+  Acceptance: routes/defaults/dependencies, real audio turn/PCM when feasible;
+  remote browser microphone/playback remains user-side acceptance.
+- Approved env/import check initially failed because probe requested old
+  vllm._C name; corrected to actual _C_stable_libtorch. CUDA=True/8 GPUs,
+  runtime/current-submodule paths and8080/8090 bind passed. No reinstall.
+- Created exclusive run20261104T105813Z_intranet_vad_bfvtKZxP with runtime
+  symlink to verified shared overlay. MiMo supervisor5967/child6419,
+  PTY26674; UI supervisor8212/child8467, PTY46600. Launch manifests retained.
+- UI TorchSileroBackend loaded11:05:41UTC; health200 MiMo=false/TTS=true
+  while model starts. TP4/EP NCCL passed and65 weight shards loading.
+  Optional DeepGEMM GLIBCXX warning falls back to MARLIN; no system changes.
+- New Doc/intranet_vad_20261104.md records current IP, launch/config and Mac
+  Chrome origin. Finite /tmp/probe_new_host_vad.py waits health then checks
+  routes/defaults30/current prompt and real preserved PCM voice -> Chat/TTS.
+  Probe outputs are exclusive; no full unit suite or code behavior changes.
+- A guessed native document glob and mistyped runtime directory were absent;
+  discovered actual files/used verified runtime instead. git diff --check pass.
+- Model API ready11:18:46UTC, finite probe33892 exited0. Final current-IP
+  health MiMo/TTS=true12.4ms; root/worklet/defaults200 and WS configure pass.
+- Real preserved speech: VASD_SEM有(.998830), VAED已(.996406), six content
+  deltas -> 三加四等于七。;71760bytes24kHzPCM. Exclusive artifact
+  audio_probe_20261104T110535Z includes defaults/events/summary/reply.wav.
+  FirstPCM29.389s vs chat.done29.198s from replay start including input/cold
+  warmup; short-answer streaming overlap not accepted, no latency baseline.
+- Services26674/46600 retained intentionally for user; all finite probes
+  finished. No behavior edits, full tests, commits/push or Mac acceptance.
+  Chinese Doc/intranet_vad_20261104.md now records launch and real evidence.
+- Approved cp -n published additive Omni/Doc/intranet_vad_20261104.md;
+  cmp matched. No historical external document overwritten.
+
+## 2026-11-03: Standalone Startup Handoff
+- User requests plain VAD/MiMo/TTS startup docs including config directory.
+  Scope is documentation only; do not stop current agent or launch duplicate.
+- Read selected plan, relevant parent/submodule status, Stage3/4 docs, current
+  server CLI/provider selection, model runner and runtime compiled link.
+- Plain root8080 already uses MiMoChatProvider without --agentic; /agent routes
+  to SDK. Current external TTS is CosyVoice8100, historical Qwen3 YAML differs.
+- New canonical Chinese handoff includes config paths/fields and per-run
+  snapshots, CLI URLs, environment/import roots, no-clobber logs, optional
+  cold MiMo startup, independent8082/SSH18080, health and actual streaming gate.
+  Stage3/4 index links added. No runtime/config mutation or GPU tests.
+- All Bash blocks passed bash -n (syntax only, no execution); paths checked
+  and git diff --check passed. Approved additive external publication to
+  Omni/Doc/standalone_vad_mimo_tts_start_20261103.md; cmp matched.
+  No commits/push, startup, shutdown or runtime acceptance claimed.
+
+## 2026-11-03: Streaming Diagnosis
+- Used explicit selected plan pin; read current plan/findings/progress and
+  inspect dirty parent/framework without reverting prior Stage6.1 work.
+- Compared agent_runtime full-text await/yield with plain semantic_vad SSE
+  delta yield and shared service incremental TTS feed. Confirmed agent
+  buffering regression; no inference code or service state changed.
+- November3 logs from retained run show native round finish followed by
+  chat.done and later TTS completion, consistent with inspected code. Logs
+  do not measure first PCM. No new tests or model calls for this explanation.
+- Guessed text_chunker.py absent; service call-site is sufficient evidence.
+  Official OpenAI search/open returned no usable content. Next streaming fix
+  should prove PCM before decode finish and preserve tool/listening behavior.
+
+## 2026-11-02: Direct Background Result Delivery Feedback
+- User reports result turn answered clothing then asked whether to hear article;
+  next "讲一下" invoked reasoning again. Scope: explicit same-turn substantive
+  delivery without confirmation, preserve returned data in bounded history for
+  follow-up reuse. No keyword-based intent gate or unrelated tool changes.
+- Explicit named-plan resolver succeeded; dirty parent/framework preserved.
+  Existing completion condition is any non-listening text, not semantic proof
+  of analysis delivery. Tool result disappears from future model messages.
+- Use planning-with-files and OpenAI Docs; official search/open returned no
+  usable contents. Implementation evidence is current local code.
+- Added config and generation rules requiring substantive same-turn analysis
+  without confirmation, plus reusable background data on delivered history
+  entries and shared builder. History remains bounded by configured rounds.
+- env.sh + omni/experiment PYTHONPATH focused5/5 passed0.453s:
+  agent combined/rejected/followup3, shared history1, WS result lifecycle1.
+  WS case now verifies a further accepted turn receives saved result without
+  new function call. Existing aiohttp warnings only; diff --check passed.
+- Real MiMo text probe artifact20261102T175158Z_stage61_delivery_6554ba9d:
+  supplied explicit test-cache analysis, no real reasoning/Mac/TTS call.
+  First response answers clothing then explains benefits/limits/recommendation,
+  no permission request. Followup expands saved analysis without tool call.
+  Not an audio/browser or real article-content acceptance.
+- Approved SIGINT supervisor2587508; old PTY34055 exited0. Wait30s then
+  reload only application; preserve model/TTS/Next/SSH/private mapping.
+- Reload run20261102T175333Z_mac_echo_5e222427, PTY48653:
+  agent2606291/8081 entry2606293/8080. Health MiMo/TTS=true13.4ms,
+  M2 mapping exact, defaults enabled/10 and /agent200 passed. No auto dialogue
+  or real tool dispatch. Finite tests/probes exited; app remains for user trial.
+- Chinese guide/inventory updated; external no-clobber snapshot
+  stage6_1_direct_delivery_zh_20261102.md published/cmp verified before final
+  additive test-evidence paragraph (external is the policy snapshot).
+  No existing output overwritten, no commit/push, no full safety suite.
+
+## 2026-11-02: Stage6.1 Nonblocking Reasoning
+- Scope: sole consult_reasoning_model background invocation; one outstanding
+  task per connection; placeholder without backend disclosure; next-response
+  result plus current input; rejected input result-only; UI running/ready.
+  Reset/disconnect cancel, ordinary response interruption does not.
+- Initial five focused Python tests:4 passed, service scenario timed out due
+  to fixture assuming function_call precedes placeholder chat.done. Corrected
+  event collection independently; rerun5/5 passed0.427s (session38019).
+- Recovery confirmed dirty all-in-one config changes retained. Explicit plan
+  resolver pin succeeded; no competing plan initialized or branch switch.
+- Review found browser cancellation clearing background receipts; fixing
+  explicit call flag before accepting SDK end-to-end behavior. A guessed
+  reasoning route path did not exist; rg inventory located api/tools/reasoning.
+- Official OpenAI search/open yielded no usable source; rely on pinned code.
+- Fresh focused8/8 passed0.545s: background module3, agent_runtime4,
+  svad_debug1. SDK transport2/2 passed (background concurrent weather plus
+  ordinary cancellation), tsc passed. Existing aiohttp/module-type warnings.
+  Required env.sh initialization incurred long filesystem/SSH setup delays;
+  tests themselves remained subsecond/short. No installs or broad suites.
+- Interpreter/import audit: omni/bin/python; background_reasoning.py and
+  agent_runtime.py resolve to this experiment directory. No serving import
+  redirects or editable reinstall. Both repository diff --check passed.
+- Chinese Stage6.1 flow and tool inventory updated. No Playwright binaries
+  found in checked caches (rg missing directories); screenshot acceptance
+  not claimed. UI is responsive unframed full-width task strip.
+- SDK background flag now preserves only reasoning across interrupt; close
+  and reset clear all receipts. Strict task/context validation, bounded retired
+  call identities, sanitized SDK tool failure and UI reconnect reset added.
+- Verified owned supervisor2557335 stopped by approved SIGINT; PTY86183
+  exited0. Wait30s before unique application launch. Model/TTS/Next/SSH retained.
+- First reload run20261102T165123Z_mac_echo_03e0d6c8 reached health:
+  MiMo/TTS=true13.3ms and exact M2 mapping; no real tool dispatched.
+  Final review added filtering after SDK schema refresh on result delivery;
+  enhanced existing combined-current-turn test invokes weather, refreshes full
+  tools, and verifies reasoning stays absent in both requests. Passed0.069s.
+  Supervisor2584146 stopped; PTY35380 exited0; wait30s then final reload.
+- External additive Chinese snapshot approved and published with cp -n to
+  /mnt/geminihzceph/user_whynotzhliu/Omni/Doc/stage6_1_nonblocking_zh_20261102.md;
+  cmp matched. No historical document replaced.
+- Final live run20261102T165557Z_mac_echo_735385b6, PTY34055:
+  agent2587738/8081 entry2587745/8080. Read-only probes passed:
+  MiMo/TTS=true11.4ms, exact Mac mapping, waiting_scope_authorization;
+  defaults background_reasoning=true/history_turns=10 and /agent HTTP200.
+  No real reasoning/Mac call or automatic dialogue started. Services retained
+  for user trial; all finite test/probe sessions exited. No commit or push.
+
+## 2026-11-02: All-In-One Agent Configuration
+- User requests tool/SDK forced prompts and retained-history rounds in
+  svad_config.json. Added prompts.agent_tool_prompt (existing baseline plus
+  Mac instructions), prompts.agent_forced_prompt and config.history_turns=10.
+- Server validates prompts and integer0..100, exposes defaults and passes
+  per-session settings to generation. JSON prompts take precedence over
+  browser SDK instructions incl after tool continuation refresh.
+  Legacy files without new keys retain existing SDK/policy/default10 behavior.
+- History storage (normal/interrupted) and message builder use configured
+  rounds;0 clears history. Tool schemas/authorization remain independent.
+- Config migration used structured Node JSON serialization and exact current
+  prompt extraction; no hand-edited string escaping. Existing user settings
+  and prompt wording retained. Chinese guide documents reconnect-to-apply.
+- Four focused tests passed1.178s under env.sh + omni/experiment PYTHONPATH:
+  native request config precedence, defaults refresh, WS10-turn retention,
+  builder0/3/10. Existing aiohttp warnings remain.
+- Approved SIGINT to2515109; old PTY63807 exited0. After30s port-release
+  wait, launcher PTY86183 created20261102T135233Z_mac_echo_f54582c3,
+  agent2557557/8081 entry2557559/8080. Private identity/policy/runtime retained.
+  Read-only probe passed health mimo/tts=true11.1ms, exact M2 mapping.
+  git diff --check passed. No real tool dispatch or auto dialogue startup.
+
 ## 2026-11-02: Publish Mac Tool Branch Checkpoint
 - User requests push to current branch. Parent and framework both
   feature/stage6-mac-tools. Scope includes selected bridge/SDK/UI/contracts,

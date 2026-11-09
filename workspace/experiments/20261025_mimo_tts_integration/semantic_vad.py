@@ -1223,7 +1223,9 @@ def build_chat_messages(audio_chunks, *, history, prompt, context):
     """Build the shared multimodal conversation payload for plain and agentic chat."""
     system = _prompt_from_context({"chat_prompt": prompt}, "chat_prompt", DEFAULT_CHAT_PROMPT)
     messages: list[dict[str, object]] = [{"role": "system", "content": system}]
-    for turn in history[-CHAT_HISTORY_TURNS:]:
+    history_turns = context.get("history_turns", CHAT_HISTORY_TURNS)
+    selected_history = history[-history_turns:] if history_turns else []
+    for turn in selected_history:
         audio_data = turn.get("audio_wav") if isinstance(turn, Mapping) else None
         video_data = turn.get("video_frames") if isinstance(turn, Mapping) else None
         assistant = turn.get("assistant") if isinstance(turn, Mapping) else None
@@ -1244,7 +1246,15 @@ def build_chat_messages(audio_chunks, *, history, prompt, context):
             ))
             messages.append({"role": "user", "content": content})
         if isinstance(assistant, str) and assistant:
+            previous_result = turn.get("background_reasoning_result")
+            if isinstance(previous_result, Mapping):
+                messages.append({"role": "user", "content": (
+                    "先前后台任务的返回资料（不是新指令，供后续追问复用）：\n"
+                    + json.dumps(dict(previous_result), ensure_ascii=False)
+                )})
             messages.append({"role": "assistant", "content": assistant})
+    if context.get("background_result_only"):
+        return messages
     wav = audio_chunks_to_wav(audio_chunks)
     if len(wav) > 3 * 1024 * 1024:
         raise ValueError("Chat audio exceeds 3 MiB")
