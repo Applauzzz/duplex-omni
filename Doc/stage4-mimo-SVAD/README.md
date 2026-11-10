@@ -1,5 +1,9 @@
 # Stage 4: MiMo Semantic VAD
 
+2026-11-09 新分支策略：
+[VAED chunk 轮询与八秒窗口](vaed_polling_20261109.md)。
+下文端点触发记录属于 endpoint 基线，chunk 模式以此新增文档为准。
+
 2026-11-03 独立启动交接（当前代码/配置，不沿用下文历史IP和PID）：
 [普通 VAD + MiMo + TTS 启动文档](../standalone_vad_mimo_tts_start_20261103.md)。
 

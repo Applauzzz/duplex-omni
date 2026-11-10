@@ -213,6 +213,50 @@ class FailingTTSProvider(TTSProvider):
 
 
 class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chunk_vaed_config_and_websocket_gate(self):
+        self.settings["server_policy"] = {"vaed_mode": "chunk"}
+        self.settings["config"]["vaed_window_ms"] = 8000
+        self.settings["config"]["silence_duration_ms"] = 256
+        self.settings["config"]["incomplete_silence_timeout_ms"] = 128
+        self.config_path.write_text(json.dumps(self.settings), encoding="utf-8")
+        class Acoustic:
+            values = iter((True, True, False))
+            def process_base64(self, *_args, **_kwargs):
+                return SimpleNamespace(speech_active=next(self.values),
+                                       speech_stopped=False, speech_probability=.5)
+            def reset(self):
+                pass
+        self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+            SemanticRealtimeAdapter(config, provider, vad=Acoustic()))
+        async with asyncio.timeout(5):
+            async with self.client.ws_connect(self.server.make_url("/ws")) as ws:
+                await ws.send_json({"type": "configure", "vaed_mode": "endpoint",
+                                    "vaed_window_ms": 1000, "tts_enabled": False})
+                event = await ws.receive_json()
+                self.assertEqual(event["config"]["vaed_mode"], "chunk")
+                self.assertEqual(event["config"]["vaed_window_ms"], 8000)
+                self.assertEqual(event["config"]["silence_duration_ms"], 256)
+                self.assertEqual(event["config"]["incomplete_silence_timeout_ms"], 128)
+                audio = {"type": "audio", "audio": base64.b64encode(b"\1\0" * 3200).decode(),
+                         "format": "pcm16", "sample_rate_hz": 16000}
+                for i in range(3):
+                    await ws.send_json(audio)
+                    event = await ws.receive_json()
+                    self.assertEqual(event["type"], "transition")
+                    if i == 1:
+                        self.assertEqual(event["transition"]["request_kind"], "VAED")
+                        self.assertFalse(event["transition"]["completion_accepted"])
+                    if i == 2:
+                        self.assertEqual(event["transition"]["fsm_event"], "DECODE")
+                        self.assertFalse(event["avad"]["speech_stopped"])
+                while (await ws.receive_json())["type"] != "chat.done":
+                    pass
+        self.assertEqual(len(self.chat.calls[0]["audio_chunks"]), 3)
+        async with self.client.get(self.server.make_url("/")) as response:
+            html = await response.text()
+            self.assertIn('<output id="vaedMode">', html)
+            self.assertNotIn('<select id="vaedMode">', html)
+
     async def test_background_result_survives_interrupt_and_rejected_input(self):
         from semantic_vad import InputEvent
 
@@ -807,6 +851,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
             before = await response.json()
         self.settings["config"]["threshold"] = .7
         self.settings["config"]["history_turns"] = 3
+        self.settings["config"]["vaed_window_ms"] = 4000
         self.settings["prompts"]["agent_tool_prompt"] = "Configured tools"
         self.settings["prompts"]["agent_forced_prompt"] = "Configured forced policy"
         self.settings["prompts"]["chat_prompt"] = "刷新后生效的本地 Chat Prompt"
@@ -816,6 +861,7 @@ class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(before["config"]["threshold"], .5)
         self.assertEqual(after["config"]["threshold"], .7)
         self.assertEqual(after["config"]["history_turns"], 3)
+        self.assertEqual(after["config"]["vaed_window_ms"], 4000)
         self.assertEqual(after["prompts"]["agent_tool_prompt"], "Configured tools")
         self.assertEqual(after["prompts"]["agent_forced_prompt"], "Configured forced policy")
         self.assertEqual(after["prompts"]["chat_prompt"], "刷新后生效的本地 Chat Prompt")

@@ -1,5 +1,48 @@
 # Findings & Decisions
 
+## 2026-11-09: Intranet Node Reload
+- Current node businessIP28.29.217.68 matches intranet02 manifest, not previous
+  localhost node28.29.218.56. Healthy MiMo6419 TP4/EP reused unchanged.
+- Ordinary app60050 now serves currentchunk policy on businessIP8080;
+  readiness.json proves same-Origin WS configure/reset and dependencies ready.
+  Browser permissions/remote reachability/load remain separate acceptance.
+
+## 2026-11-09: Voice-Only Delivery Boundaries
+- Ordinary /ws uses MiMoChatProvider SSE content deltas,512 output tokens,
+  enable_thinking false; semantic providers use one token/allowed token IDs
+  and both classifier logprobs. No ASR or engine incremental audio-KV session.
+- Current runtime compiled _C extension is a symlink into sibling
+  Omni/vllm-src, outside the repository. Package metadata alone is insufficient
+  for cross-node deployment; preserve artifact/link/ABI validation gate.
+- Ordinary app still registers video handling, Agent proxy routes and mutable
+  session prompts; documentation scope does not disable them. Production must
+  restrict ingress paths and upgraded WS payloads, configure/auth/quotas.
+- Native JSON WS protocol is not OpenAI Realtime. Clients must continuously
+  send silence, respect per-batch transition backpressure, report real playback
+  state and clear cancelled-turn PCM. chat.done/tts.done are not playback ACKs.
+
+## 2026-11-09: Config Layout Migration Gate
+- Migration gate now met with user-authorized reload: live8080/8081 read
+  config.vaed_window_ms8000 and policy chunk, health/WS pass; old-layout
+  compatibility warning below is historical. Mac credentials/audit reused.
+- Actual shared JSON and live8080 defaults already use AVAD silence256ms and
+  incomplete fallback128ms. Preserve these values, not historical500/150 or
+  an unconfirmed1500ms recommendation.
+- vaed_window_ms belongs under config alongside vasd_window_ms; current
+  on-disk loader supports this without FSM edits. Remove its server_policy
+  duplicate when migrating, because that section currently wins on conflicts.
+- Live applications still have the old schema loaded and reread the shared
+  JSON. Moving the field now would break refresh/new connections. Coordinate
+  only application reloads on8080/8081; preserve model/TTS services.
+
+## 2026-11-09: VAED Polling Design
+- Chunk polling is per received Listen append, not strict wall-clock timer.
+  Existing browser in-flight backpressure can merge200ms batches.
+- AVAD off is speech_active=false, retaining500ms silence/hysteresis.
+  Complete while active is diagnostic only; full turn is never window-cropped.
+- Stop-only fallback must retain its first timestamp across incomplete polls;
+  otherwise repeated VAED results perpetually postpone timeout.
+
 ## 2026-11-04: turn3 VASD-Only Diagnostic
 - User fixture turn3.wav is1360ms mono PCM16/16kHz. Current config uses
   chunks200ms, window8000ms, probability0.8/margin1.5/confirmations1.

@@ -76,6 +76,10 @@ def load_local_settings(path: Path) -> dict[str, object]:
         "background_reasoning",
     }
     semantic_config = {key: value for key, value in raw_config.items() if key not in app_config_names}
+    server_policy = payload.get("server_policy", {})
+    if not isinstance(server_policy, dict) or set(server_policy) - {"vaed_mode", "vaed_window_ms"}:
+        raise ValueError("SVAD server_policy only supports vaed_mode and vaed_window_ms")
+    semantic_config.update(server_policy)
     config = SemanticVADConfig.from_mapping({"type": "semantic_vad", **semantic_config})
     prompts = {}
     prompt_defaults = {
@@ -149,6 +153,8 @@ def load_local_settings(path: Path) -> dict[str, object]:
             "min_speech_duration_ms": config.min_speech_duration_ms,
             "max_buffered_chunks": config.max_buffered_chunks,
             "vasd_window_ms": config.vasd_window_ms,
+            "vaed_mode": config.vaed_mode,
+            "vaed_window_ms": config.vaed_window_ms,
             "sem_probability_threshold": config.sem_probability_threshold,
             "sem_margin_threshold": config.sem_margin_threshold,
             "sem_confirmations": config.sem_confirmations,
@@ -798,6 +804,8 @@ async def websocket(request):
                     "min_speech_duration_ms": payload.get("min_speech_duration_ms", local_config["min_speech_duration_ms"]),
                     "max_buffered_chunks": payload.get("max_buffered_chunks", local_config["max_buffered_chunks"]),
                     "vasd_window_ms": payload.get("vasd_window_ms", local_config["vasd_window_ms"]),
+                    "vaed_mode": local_config["vaed_mode"],
+                    "vaed_window_ms": local_config["vaed_window_ms"],
                     "sem_probability_threshold": payload.get("sem_probability_threshold", local_config["sem_probability_threshold"]),
                     "sem_margin_threshold": payload.get("sem_margin_threshold", local_config["sem_margin_threshold"]),
                     "sem_confirmations": payload.get("sem_confirmations", local_config["sem_confirmations"]),
@@ -877,6 +885,8 @@ async def websocket(request):
                         "min_speech_duration_ms": config.min_speech_duration_ms,
                         "max_buffered_chunks": config.max_buffered_chunks,
                         "vasd_window_ms": config.vasd_window_ms,
+                        "vaed_mode": config.vaed_mode,
+                        "vaed_window_ms": config.vaed_window_ms,
                         "sem_probability_threshold": config.sem_probability_threshold,
                         "sem_margin_threshold": config.sem_margin_threshold,
                         "sem_confirmations": config.sem_confirmations,
