@@ -8,6 +8,8 @@ Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
 November10 user authorizes committing and pushing feature/svad-vaed-polling.
+Implementation/docs checkpoint539b296 is committed and pushed; upstream set.
+Fresh focused verification passed5/5. A records-only followup captures receipt.
 Scope: VAED polling/config/UI/focused tests, Chinese online handoff and plan
 records. Preserve untracked tmp/wx_tts_ref.py and all running services.
 Check remote ancestry, run focused local tests, publish without force or merge

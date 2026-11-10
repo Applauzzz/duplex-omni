@@ -23,6 +23,12 @@
   refs/heads/feature/svad-vaed-polling exited0 with no matching remote branch.
   Publish as a new upstream branch without force. Push outcome recorded after
   publication; audio quality/load/production acceptance gates remain open.
+- Implementation/docs checkpoint539b296 committed (17 files,+1294/-15).
+  env.sh + github_env.sh + timeout120 git push -u origin
+  feature/svad-vaed-polling exited0, created the remote branch and configured
+  upstream. Add this publication receipt in a separate records-only commit.
+  No submodule changes, service restart or main merge; tmp/wx_tts_ref.py remain
+  untracked locally.
 
 ## 2026-11-09: New-Cluster Intranet Demo Reload Scope
 - User authorizes reloading old ordinary WS VAD demo for other users.
