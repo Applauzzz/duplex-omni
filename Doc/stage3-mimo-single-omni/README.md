@@ -16,6 +16,10 @@ MiMo-V2.6-Flash-RL 是唯一的多模态理解与回复生成模型；Qwen3-TTS 
 
 ## 文档入口
 
+2026-11-09 纯语音上线交接：
+[online-server](../online-server/README.md)。本次仅WebSocket VAD+MiMo+外部TTS，
+不包含视频与Agent，部署和调度以该交接目录为准。
+
 | 文件 | 内容 |
 |------|------|
 | [standalone_vad_mimo_tts_start_20261103.md](../standalone_vad_mimo_tts_start_20261103.md) | 普通 VAD+MiMo+外部 TTS 启动交接：配置目录、runtime、端口、SSH 与验收 |

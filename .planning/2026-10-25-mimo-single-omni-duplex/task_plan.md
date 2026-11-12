@@ -7,6 +7,50 @@ and Qwen3-TTS CustomVoice as the initial independent speech renderer.
 Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
+November10 user authorizes committing and pushing feature/svad-vaed-polling.
+Implementation/docs checkpoint539b296 is committed and pushed; upstream set.
+Fresh focused verification passed5/5. A records-only followup captures receipt.
+Scope: VAED polling/config/UI/focused tests, Chinese online handoff and plan
+records. Preserve untracked tmp/wx_tts_ref.py and all running services.
+Check remote ancestry, run focused local tests, publish without force or merge
+to main. The November9 unpublished statements below are historical.
+Real speech quality, browser playback, latency/load and production isolation
+remain open after repository publication.
+
+November9 new-cluster intranet demo reload complete on28.29.217.68:8080:
+ordinary app60050/supervisor59933, run20261109_intranet_chunk_rzxilUYm.
+Health/defaults/page/worklet/same-Origin WS configure/reset pass; config
+chunk8000/200/256/128/history30, MiMo6419/external TTS preserved.
+No Agent startup. Next remote user microphone/playback and load acceptance.
+HTTP demo needs browser secure-origin test setup or SSH; no Internet/TLS/auth
+production readiness claim. See Doc/online-server/intranet_demo_20261109.md.
+
+November9 voice-only engineering handoff created in Doc/online-server:
+README, deployment, scheduling, websocket. Explicitly exclude video/Agent;
+state runtime portability, unpublished dirty code, ingress isolation and
+production capacity/audio acceptance gates. Documentation-only task;
+no service restart, release commit or new audio/load acceptance.
+
+November9 authorized config migration/reload complete: config.vaed_window_ms
+is8000, server_policy.vaed_mode ischunk; preserve256ms silence/128ms fallback,
+200ms chunks/history30. Two focused service cases pass; live8080/8081
+health/defaults/page/WS and8080/agent200 pass. New run
+20261109T071156Z_mac_echo_7bf548e5, app PIDs2967420/2967422.
+MiMo PID2301222/external TTS untouched; original Mac identity/audit/M2 reused.
+Next real user speech/pause/false-positive/latency acceptance; no further FSM
+edits, commit or push. Reload disconnects clients; reconnect media/Mac as needed.
+
+November9 new feature/svad-vaed-polling from8352472: implement opt-in chunk
+VAED polling with independent8000ms window, confidence/confirmation gates,
+Decode only when AVAD speech_active=false, stop-only incomplete timeout.
+Preserve full Chat audio and endpoint baseline. Focused <=5 cases/module,
+local WS acceptance first; reload now completed as recorded above, no commit/push.
+Implementation/local gates passed7 focused cases; next coordinated application
+reload and chunk activation, then real speech latency/quality/load acceptance.
+Current live processes now use chunk. JSON config owns window8000;
+server_policy owns modechunk.
+Front-end mode/window display only, configure cannot override server policy.
+
 November9 user authorizes current feature/stage6-mac-tools checkpoint commit
 and push (framework first, parent gitlink second); user will merge main.
 Keep unfinished audio/playback/quality gates open and all live services intact.

@@ -444,6 +444,8 @@ class SemanticVADController:
         *,
         max_buffered_chunks: int = 512,
         vasd_window_ms: int = 8000,
+        vaed_mode: str = "endpoint",
+        vaed_window_ms: int = 8000,
         sem_probability_threshold: float = 0.8,
         sem_margin_threshold: float = 1.5,
         sem_confirmations: int = 1,
@@ -454,6 +456,8 @@ class SemanticVADController:
         self.provider = provider
         self.fsm = DuplexInputFSM(max_buffered_chunks=max_buffered_chunks)
         self.vasd_window_ms = vasd_window_ms
+        self.vaed_mode = vaed_mode
+        self.vaed_window_ms = vaed_window_ms
         self.sem_probability_threshold = sem_probability_threshold
         self.sem_margin_threshold = sem_margin_threshold
         self.sem_confirmations = sem_confirmations
@@ -479,8 +483,11 @@ class SemanticVADController:
         )
 
     def _vasd_audio(self, audio_chunk: object) -> tuple[object, ...]:
+        return self._window_audio(audio_chunk, self.vasd_window_ms)
+
+    def _window_audio(self, audio_chunk: object, window_ms: int) -> tuple[object, ...]:
         chunks = self.fsm.semantic_audio_with(audio_chunk)
-        if self.vasd_window_ms <= 0 or not chunks:
+        if window_ms <= 0 or not chunks:
             return chunks
         selected: list[object] = []
         duration_ms = 0.0
@@ -488,11 +495,11 @@ class SemanticVADController:
             chunk_ms = _chunk_duration_ms(chunk) if isinstance(chunk, Mapping) else 0.0
             if chunk_ms <= 0:
                 return chunks
-            if selected and duration_ms + chunk_ms > self.vasd_window_ms:
+            if selected and duration_ms + chunk_ms > window_ms:
                 break
             selected.append(chunk)
             duration_ms += chunk_ms
-            if duration_ms >= self.vasd_window_ms:
+            if duration_ms >= window_ms:
                 break
         return tuple(reversed(selected))
 
@@ -569,7 +576,8 @@ class SemanticVADController:
                 ))
                 self.fsm.record(output, context=semantic_context)
                 return output
-            if speech and not speech_stopped:
+            polling = self.vaed_mode == "chunk" and audio_chunk is not None
+            if speech and not speech_stopped and not polling:
                 output = self.fsm.step(FSMInput(
                     audio_chunk=audio_chunk,
                     speech=True,
@@ -578,7 +586,7 @@ class SemanticVADController:
                 ))
                 self.fsm.record(output, context=semantic_context)
                 return output
-            if not speech_stopped:
+            if not speech_stopped and not polling:
                 output = self.fsm.step(FSMInput(
                     audio_chunk=None,
                     speech=False,
@@ -589,7 +597,8 @@ class SemanticVADController:
                 return output
             started = time.monotonic()
             decision = await self.provider.decide_complete(
-                self.fsm.semantic_audio_with(audio_chunk),
+                (self._window_audio(audio_chunk, self.vaed_window_ms) if polling
+                 else self.fsm.semantic_audio_with(audio_chunk)),
                 context=semantic_context,
             )
             qualifies = bool(
@@ -600,7 +609,9 @@ class SemanticVADController:
                 and decision.margin >= self.complete_margin_threshold
             )
             self._complete_confirmation_count = self._complete_confirmation_count + 1 if qualifies else 0
-            accepted = qualifies and self._complete_confirmation_count >= self.complete_confirmations
+            accepted = (qualifies
+                        and self._complete_confirmation_count >= self.complete_confirmations
+                        and (not polling or not speech))
             output = replace(self.fsm.step(FSMInput(
                 audio_chunk=audio_chunk,
                 speech=speech,
@@ -639,6 +650,8 @@ class SemanticVADConfig:
     min_speech_duration_ms: int = 96
     max_buffered_chunks: int = 512
     vasd_window_ms: int = 8000
+    vaed_mode: str = "endpoint"
+    vaed_window_ms: int = 8000
     sem_probability_threshold: float = 0.8
     sem_margin_threshold: float = 1.5
     sem_confirmations: int = 1
@@ -657,6 +670,8 @@ class SemanticVADConfig:
             "min_speech_duration_ms",
             "max_buffered_chunks",
             "vasd_window_ms",
+            "vaed_mode",
+            "vaed_window_ms",
             "sem_probability_threshold",
             "sem_margin_threshold",
             "sem_confirmations",
@@ -704,6 +719,17 @@ class SemanticVADConfig:
             or float(vasd_window_ms) <= 0
         ):
             raise ValueError("semantic_vad.vasd_window_ms must be a positive number")
+        vaed_mode = value.get("vaed_mode", "endpoint")
+        if vaed_mode not in ("endpoint", "chunk"):
+            raise ValueError("semantic_vad.vaed_mode must be endpoint or chunk")
+        vaed_window_ms = value.get("vaed_window_ms", 8000)
+        if (
+            not isinstance(vaed_window_ms, int | float)
+            or isinstance(vaed_window_ms, bool)
+            or not math.isfinite(float(vaed_window_ms))
+            or float(vaed_window_ms) <= 0
+        ):
+            raise ValueError("semantic_vad.vaed_window_ms must be a positive number")
         sem_probability = value.get("sem_probability_threshold", 0.8)
         if (
             not isinstance(sem_probability, int | float)
@@ -758,6 +784,8 @@ class SemanticVADConfig:
             threshold=float(threshold),
             max_buffered_chunks=max_chunks,
             vasd_window_ms=int(vasd_window_ms),
+            vaed_mode=vaed_mode,
+            vaed_window_ms=int(vaed_window_ms),
             sem_probability_threshold=float(sem_probability),
             sem_margin_threshold=float(sem_margin),
             sem_confirmations=sem_confirmations,
@@ -808,6 +836,8 @@ class SemanticRealtimeAdapter:
             provider,
             max_buffered_chunks=config.max_buffered_chunks,
             vasd_window_ms=config.vasd_window_ms,
+            vaed_mode=config.vaed_mode,
+            vaed_window_ms=config.vaed_window_ms,
             sem_probability_threshold=config.sem_probability_threshold,
             sem_margin_threshold=config.sem_margin_threshold,
             sem_confirmations=config.sem_confirmations,
@@ -936,9 +966,11 @@ class SemanticRealtimeAdapter:
             speech_stopped=bool(getattr(vad_result, "speech_stopped", False)),
             context=context,
         )
-        if output.semantic_endpoint_evaluated and not output.completion_accepted:
+        if (output.semantic_endpoint_evaluated and not output.completion_accepted
+                and not vad_result.speech_active):
             self._semantic_waiting = True
-            self._incomplete_silence_started = time.monotonic()
+            if self._incomplete_silence_started is None:
+                self._incomplete_silence_started = time.monotonic()
             self.last_avad["semantic_waiting"] = True
             self.last_avad["incomplete_silence_elapsed_ms"] = 0.0
         elif output.event == InputEvent.DECODE:

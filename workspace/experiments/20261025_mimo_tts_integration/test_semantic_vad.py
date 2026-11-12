@@ -154,6 +154,47 @@ class FSMTests(unittest.TestCase):
 
 
 class ControllerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chunk_vaed_window_preserves_turn_and_requires_avad_off(self):
+        audio = [{"audio": base64.b64encode(b"\1\0" * 32000).decode(),
+                  "format": "pcm16", "sample_rate_hz": 16000, "id": i}
+                 for i in range(6)]
+        provider = ScriptedProvider(
+            breaks=[VASDDecision(True)],
+            completes=[VAEDDecision(True, probability=.95, margin=3)] * 5)
+        controller = SemanticVADController(provider, vaed_mode="chunk", vaed_window_ms=8000)
+        await controller.process(audio[0], speech=True)
+        for item in audio[1:5]:
+            output = await controller.process(item, speech=True)
+            self.assertEqual(output.event, InputEvent.CHUNK_PREFILL)
+            self.assertFalse(output.completion_accepted)
+        decoded = await controller.process(audio[5], speech=False)
+        self.assertEqual(decoded.event, InputEvent.DECODE)
+        self.assertEqual(decoded.decode_audio, tuple(audio))
+        self.assertEqual(provider.calls[-1][1], tuple(audio[-4:]))
+        self.assertEqual([call[0] for call in provider.calls],
+                         ["sem"] + ["complete"] * 5)
+
+    async def test_chunk_vaed_confirmation_and_config_validation(self):
+        provider = ScriptedProvider(
+            breaks=[VASDDecision(True)],
+            completes=[VAEDDecision(True, probability=.95, margin=3),
+                       VAEDDecision(False, probability=.95, margin=3),
+                       VAEDDecision(True, probability=.95, margin=3),
+                       VAEDDecision(True, probability=.95, margin=3)])
+        controller = SemanticVADController(provider, vaed_mode="chunk", complete_confirmations=2)
+        await controller.process(chunk(0), speech=True)
+        counts = []
+        for i in range(1, 5):
+            output = await controller.process(chunk(i), speech=False)
+            counts.append(output.completion_confirmation_count)
+        self.assertEqual(counts, [1, 0, 1, 2])
+        self.assertEqual(output.event, InputEvent.DECODE)
+        self.assertEqual(SemanticVADConfig.from_mapping({}).vaed_mode, "endpoint")
+        for value in ({"vaed_mode": "bad"}, {"vaed_window_ms": 0},
+                      {"vaed_window_ms": True}):
+            with self.assertRaises(ValueError):
+                SemanticVADConfig.from_mapping(value)
+
     async def test_weak_semantic_candidate_stays_in_judge(self):
         provider = ScriptedProvider(breaks=[
             VASDDecision(True, probability=.54, margin=.25, command="<b>"),
@@ -505,6 +546,44 @@ class ConfigTests(unittest.TestCase):
 
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chunk_vaed_timeout_is_stop_only_and_not_reset_by_polling(self):
+        from unittest.mock import patch
+        class VAD:
+            active = True
+            def process_base64(self, *_args, **_kwargs):
+                return SimpleNamespace(speech_active=self.active, speech_stopped=False)
+        vad = VAD()
+        provider = ScriptedProvider(
+            breaks=[VASDDecision(True)],
+            completes=[VAEDDecision(False, probability=.95, margin=3)] * 10)
+        adapter = SemanticRealtimeAdapter(
+            SemanticVADConfig(vaed_mode="chunk", incomplete_silence_timeout_ms=150),
+            provider, vad=vad)
+        async def append():
+            return await adapter.process_append(
+                self.audio(), default_format="pcm16", default_sample_rate_hz=16000)
+        with patch("semantic_vad.time.monotonic", return_value=1):
+            await append()
+            await append()
+            self.assertIsNone(adapter._incomplete_silence_started)
+            vad.active = False
+            await append()
+            self.assertEqual(adapter._incomplete_silence_started, 1)
+        with patch("semantic_vad.time.monotonic", return_value=1.1):
+            await append()
+            self.assertEqual(adapter._incomplete_silence_started, 1)
+            vad.active = True
+            await append()
+            self.assertIsNone(adapter._incomplete_silence_started)
+            vad.active = False
+            await append()
+            self.assertEqual(adapter._incomplete_silence_started, 1.1)
+        with patch("semantic_vad.time.monotonic", return_value=1.3):
+            output, commands = await append()
+        self.assertEqual(output.decode_reason, "incomplete_silence_timeout")
+        self.assertEqual(len(output.decode_audio), 6)
+        self.assertEqual([c["type"] for c in commands], ["input_audio_buffer.commit"])
+
     class AlwaysSpeechVAD:
         def __init__(self):
             self.reset_count = 0
@@ -828,7 +907,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["type"] for item in commands], [
             "input_audio_buffer.commit",
         ])
-        self.assertEqual([call[0] for call in provider.calls], ["break", "complete"])
+        self.assertEqual([call[0] for call in provider.calls], ["sem", "complete"])
 
 
 class ChatProviderTests(unittest.IsolatedAsyncioTestCase):

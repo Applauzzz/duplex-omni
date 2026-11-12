@@ -1,5 +1,213 @@
 # Progress Log
 
+## 2026-11-10: VAED Polling Publication
+- User authorizes commit/push on feature/svad-vaed-polling, baseline8352472.
+  Scope: existing polling/config/UI/tests, Chinese handoff/docs and plan records.
+  All three submodule worktrees are clean; no gitlink changes needed.
+- Preserve untracked tmp/wx_tts_ref.py and raw/private artifacts. No service
+  reload, model request, main merge or force push. Update delivery wording to
+  distinguish the implementation checkpoint from the older development base.
+- Fresh env.sh + omni verification confirms interpreter in my_envs/miniconda3/
+  envs/omni and both application imports in this checkout. Process-local
+  PYTHONPATH: experiment,20261104T105813Z_intranet_vad_bfvtKZxP/runtime,
+  current vllm-omni. python -B -m unittest selected5 passed in2.382s:
+  ControllerTests.test_chunk_vaed_window_preserves_turn_and_requires_avad_off,
+  ControllerTests.test_chunk_vaed_confirmation_and_config_validation,
+  AdapterTests.test_chunk_vaed_timeout_is_stop_only_and_not_reset_by_polling,
+  DebugServiceTests.test_chunk_vaed_config_and_websocket_gate,
+  DebugServiceTests.test_defaults_reread_local_file_on_every_refresh.
+  First three from test_semantic_vad, last two from test_svad_debug.
+  Existing aiohttp warnings retained; no GPU/model/audio-quality acceptance.
+- git diff --check passed; scoped credential-pattern scan found no matches.
+  env.sh + github_env.sh + timeout60 git ls-remote --heads origin
+  refs/heads/feature/svad-vaed-polling exited0 with no matching remote branch.
+  Publish as a new upstream branch without force. Push outcome recorded after
+  publication; audio quality/load/production acceptance gates remain open.
+- Implementation/docs checkpoint539b296 committed (17 files,+1294/-15).
+  env.sh + github_env.sh + timeout120 git push -u origin
+  feature/svad-vaed-polling exited0, created the remote branch and configured
+  upstream. Add this publication receipt in a separate records-only commit.
+  No submodule changes, service restart or main merge; tmp/wx_tts_ref.py remain
+  untracked locally.
+
+## 2026-11-09: New-Cluster Intranet Demo Reload Scope
+- User authorizes reloading old ordinary WS VAD demo for other users.
+  Current host business IP28.29.217.68, not prior28.29.218.56.
+  Verified old app35622/PGID35622 against intranet02 launch manifest;
+  MiMo6419 remains loopback8090 TP4/EP. Health reports MiMo/TTS true.
+- Preserve shared dirty worktree/config and models; use current main JSON
+  chunk/8000/200/256/128/history30. Reload only owned ordinary app8080,
+  retain business-IP binding and known runtime overlay. No Agent startup.
+- ip/ss unavailable; approved hostname/process/HTTP checks establish host
+  and app ownership. New run must be exclusive. Internal demo HTTP/WS
+  remains non-TLS, browser microphone requires secure-origin setup or SSH.
+  Do not claim Internet/public-production readiness or fresh load acceptance.
+- env.sh + omni with old node runtime/current Omni imports verified current
+  semantic_vad/svad_debug_server and effective configchunk8000/200/256/128/30.
+- Exclusive mktemp run workspace/logs/20261109_intranet_chunk_rzxilUYm;
+  runtime symlink reuses current host's verified intranet runtime. Sent SIGINT
+  only old app35622; exited defunct. MiMo6419 kept running.
+- Started existing run_service.py --role svad-ui --attempt chunk01 --port8080
+  --ui-host28.29.217.68, retained service session98650; app60050,
+  supervisor59933. No Agent startup or shared config/code edits.
+  TorchSileroBackend loaded after normal initialization; version warning retained.
+- /tmp/probe_intranet_chunk_demo.py exited0: same-host-Origin WS101 and
+  configured/reset passed; page/worklet/defaults200, healthMiMo/TTS true,
+  effective chunk8000/200/256/128/history30. Result saved readiness.json.
+  No audio replay/model request, browser media or load acceptance.
+- Added Doc/online-server/intranet_demo_20261109.md with currentIP, raw WS
+  URL, MacChrome dedicated secure-origin command, exact runtime/log ownership,
+  HTTP/intranet/demo versus production boundary. Existing debug video controls
+  remain; users should not enable camera. No TLS/auth/scope hardening claimed.
+
+## 2026-11-09: Voice-Only Online Handoff Scope
+- User requests a Chinese engineering handoff under Doc/online-server:
+  project/scope, delivery environment/deployment and complete scheduling maps.
+  Scope is WebSocket audio-only AVAD/VASD/VAED + MiMo + current external TTS;
+  exclude video, Agent SDK, tools and background reasoning.
+- Documentation-only: preserve existing services, code/config and dirty branch.
+  Restore selected plan and inspect current implementation, not historical
+  voice/video or ten-turn instructions. Current config is chunk/8000,
+  audio200, AVAD256, fallback128, history30.
+- Important handoff distinctions: actual TTS is external CosyVoice submit/poll,
+  not historical Qwen3-TTS; PREFill FSM events do not prove engine audio-KV
+  incremental prefill; plain server still registers out-of-scope routes and
+  accepts optional video. Scope exclusion requires ingress/client validation,
+  not a false claim that --agentic omission disables every route/payload.
+- Deliver additive README, deployment, scheduler and protocol documents.
+  Verify examples against local code/CLI and resource/import inventory;
+  do not load models, replay audio or run broad safety fixtures.
+- Initial environment/IP/import/health audit was interrupted by user; do not
+  claim it completed. Resumed metadata-only check under env.sh + omni passed:
+  Python3.12.14, torch2.13.0+cu129, transformers5.14.1,
+  vllm0.30.1.dev0+gced6857af.d20260929.cu129, Omni0.1.0,
+  aiohttp3.14.3, numpy2.3.5. Current application/model processes still present;
+  GPU inventory reports eight H20/97871MiB and driver575.57.08.
+- Added Doc/online-server/{README,deployment,scheduling,websocket}.md and
+  canonical Stage3 entry link. Four Mermaid blocks cover topology, input
+  FSM/timeout, streaming sequence and cancellation/pending. Document actual
+  config256/128/200/8000/history30, PCM protocol, production scope enforcement,
+  artifact publication/runtime links, isolation/auth/quotas and remaining gates.
+- Static Node validation passed7 JSON examples,4 relative local links,
+  balanced fences,4 Mermaid blocks and5 shell blocks inventoried.
+  Automated shell syntax attempt hung in spawned bash; cancelled only own
+  checker processes2979332/2979249, then bounded isolated retry timed out.
+  Shell examples reviewed against local CLI/source, not executed/automatically
+  syntax-accepted. Mermaid diagrams not rendered with a parser in this turn.
+- Directory did not exist (ls/rg exit2), created additively via apply_patch.
+  Earlier hostname probe sandbox-denied; unmatched historical manifest glob
+  failed, so used direct runtime symlink inspection. No fresh IP claim.
+- git diff --check passed. No application/unit/model tests needed for this
+  documentation-only change; no new audio/load acceptance, live restart,
+  configuration/code modification, credential copying, commit or push.
+
+## 2026-11-09: Authorized Config Migration And Application Reload
+- User approves window migration and reload of8080/8081 applications only.
+  Preserve256ms AVAD silence,128ms incomplete timeout,200ms audio chunks,
+  Mac private identity/audit/M2 policy, MiMo PID2301222 and external TTS.
+- Verified old app PIDs2606291/2606293 against launch manifests; supervisor
+  2606112 is absent, both children are independent session/process-group owners.
+- Test the config layout in temporary fixtures before changing shared JSON.
+  Extend only two existing service cases for config window reload, forged
+  browser override rejection and unchanged256/128 values. No FSM edits.
+- Initial run_service.py lookup used the wrong experiment directory (exit2);
+  found the existing launch_mac_echo.py instead. It creates exclusive run
+  directories and supports reuse-private-dir and m2-policy-file.
+- env.sh + conda activate omni, PYTHONPATH experiment/runtime/vllm-omni:
+  verified sys.executable and current semantic_vad/svad_debug_server imports;
+  vllm imports the verified native-agent runtime overlay. Command:
+  python -B -m unittest
+  test_svad_debug.DebugServiceTests.test_chunk_vaed_config_and_websocket_gate
+  test_svad_debug.DebugServiceTests.test_defaults_reread_local_file_on_every_refresh
+  passed2/2 in0.546s (existing aiohttp warnings only).
+- SIGINT only old apps2606291/2606293; both exited to defunct state. MiMo
+  PID2301222 remains running. Migrated window8000 to config, removed duplicate
+  policy window; unchanged256/128/200/history30. Updated stale descriptions.
+- Started existing launch_mac_echo.py with original runtime, reuse-private-dir
+  and m2-policy-file in retained service session66964. Exclusive run:
+  workspace/logs/20261109T071156Z_mac_echo_7bf548e5;
+  agent2967420 on8081, entry2967422 on8080. Launch manifests/logs retained.
+  Both apps loaded TorchSileroBackend; historical version-mismatch warning
+  retained without environment installation changes.
+- Verification script /tmp/probe_vaed_config_reload.py initially ran before
+  port readiness (connection refused); added bounded readiness wait.
+  First WS used mismatched127.0.0.1 Host/localhost Origin (correctly403).
+  localhost hostname resolves to business IP28.29.218.56 here, not loopback,
+  so that retry was refused; final probe uses loopback transport plus matching
+  localhost Host/Origin. A wrong mac_m2_bridge.py lookup failed (exit2);
+  rg --files found mac_m2.py. Multi-file tail -12 failed; tail -n12 succeeded.
+- Final script exited0: both health endpoints report MiMo/TTS true;
+  defaults show chunk/8000/200/256/128/history30; both root pages200 with
+  display-only window; both real WS configure reject endpoint/1000 override
+  and return chunk/8000. Proxied8080/agent200. No audio/model/tool request.
+- Updated Chinese VAED document with current config layout/parameter values
+  and live run status. git diff --check passed. No new core FSM changes,
+  model restart, real-speech quality acceptance, commit or push.
+
+## 2026-11-09: Parameter-Only Tuning And Config Migration Audit
+- User requests minimal existing-parameter tuning and moving vaed_window_ms
+  under config; no additional FSM changes or application reload authorized.
+- Recovered the selected plan and current feature/svad-vaed-polling diff.
+  Submodules remain clean; preserved all existing edits and untracked drafts.
+- Actual JSON already contains silence_duration_ms=256 and
+  incomplete_silence_timeout_ms=128, contrary to the handoff's older values.
+  Preserve these user edits; do not substitute the suggested1500ms timeout.
+- First local defaults probe was sandbox-blocked (curl exit7); env.sh also
+  reported read-only SSH setup paths. Retried the read-only probe with approval
+  after sourcing env.sh; /defaults returned200 and confirmed256/128.
+- Current application PIDs2606293 (8080) and2606291 (8081) run the old schema.
+  Live defaults omit VAED mode/window. New on-disk loader accepts window in
+  config, but old in-memory loader rejects unknown config keys on refresh.
+- Defer the shared JSON migration until coordinated application reload approval
+  rather than knowingly break live /defaults and new WebSocket connections.
+  Intended layout: server_policy.vaed_mode=chunk, config.vaed_window_ms=8000;
+  remove the duplicate server_policy window so it cannot override config.
+  Frontend remains display-only. No runtime/core-code edits, restart, model
+  request, tests, commit or push in this audit.
+
+## 2026-11-09: Server-Owned VAED Policy
+- User requests JSON-only mode with display-only UI. Put chunk/8000 in
+  top-level server_policy to preserve old live loader compatibility.
+  New loader validates/merges policy; browser configure overrides ignored.
+  UI uses output fields and sends neither mode nor window. No reload.
+- AVAD processing precedes VAED serially;500ms is persistent sample-based
+  silence accumulation, not a wall-clock race against semantic inference.
+- env.sh + omni/current runtime imports: selected2 service tests pass0.533s,
+  real WS forged endpoint/1000 overrides ignored in favor of chunk/8000.
+  Main JSON load yields chunk8000; display-only output checked; Node inline
+  syntax and diff check pass. Current live processes untouched.
+
+## 2026-11-09: VAED Chunk Polling
+- Parent8352472/framework57592f9 published. New branch requested for SVAD.
+  Scope before edits: vaed_mode endpoint/chunk, vaed_window_ms8000;
+  chunk mode classifies every received Listen audio batch, serially, including
+  inactive batches. No independent timer/no overlapping requests. Browser
+  audio_chunk_ms is target batching cadence, actual batches may merge.
+- Decode requires qualified completion and AVAD speech_active=false.
+  AVAD500ms stop/hysteresis remains; not instantaneous frame probability gate.
+  Incomplete timeout starts only after inactive unsuccessful VAED and does
+  not restart each poll; active speech clears it. Preserve full turn audio,
+  old endpoint mode/default for legacy configs. Defer active new JSON fields
+  until reload: old live loader rejects unknown config fields on refresh.
+  Main JSON includes field descriptions only; new page can select chunk.
+- No model/application restart. Acceptance uses focused window/gate/fallback
+  tests and local real WebSocket with controlled providers; live speech later.
+- First focused7 run:6 pass; old endpoint timeout behavior passes but final
+  provider-call assertion expects historical break instead of current sem.
+  Correct stale assertion, rerun same set; no broader suite.
+- Final same7 cases pass0.519s under env.sh + omni, experiment/current runtime
+  + vllm-omni PYTHONPATH; verified current interpreter/service roots.
+  Semantic module5 unique cases, service2 incl real local WebSocket:
+  active complete blocked, inactive/no stop-edge complete Decode, full
+  Chat audio retained, independent8s classification window, confirmation
+  reset, stop-only/non-restarting timeout and legacy endpoint baseline.
+  Node inline-JS syntax and git diff --check pass. No GPU/model requests.
+- New branch feature/svad-vaed-polling, docs
+  Doc/stage4-mimo-SVAD/vaed_polling_20261109.md. No commit/push/live reload.
+  New code selected through vaed_mode=chunk after application reload;
+  active JSON fields deferred to avoid breaking old live config loader.
+  Remaining gate: real speech/poll latency/load and application reload.
+
 ## 2026-11-09: User-Requested Mac Tools Branch Publication
 - Publish current parent/framework feature/stage6-mac-tools only; user will
   merge main manually. Preserve running services and dirty work; no merge main.
