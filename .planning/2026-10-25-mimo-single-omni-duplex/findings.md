@@ -1,5 +1,19 @@
 # Findings & Decisions
 
+## 2026-11-10: Agent SDK Versus Application Harness
+- Current duplex page uses browser RealtimeSession with custom transport and
+  tracingDisabled=true. Manifest has one duplex_assistant with no handoffs.
+  Installed realtimeSession invokes tools; TS definitions provide executors,
+  transport maps native application events and returns correlated outputs.
+- Python AgenticMiMoChatProvider owns model/tool/model loop, SSE accumulation,
+  round limit, timeout and background-result instructions. Model-facing history,
+  AVAD/VASD/VAED, TTS, Mac authorization and background lifecycle are application
+  responsibilities, not capabilities supplied by the browser SDK.
+- There is a partial application harness, not an autonomous persistent task
+  system. No such acceptance should be inferred from SDK integration.
+  Official documentation search/open returned no content in this audit;
+  conclusions are grounded in current source and installed SDK only.
+
 ## 2026-11-09: Intranet Node Reload
 - Current node businessIP28.29.217.68 matches intranet02 manifest, not previous
   localhost node28.29.218.56. Healthy MiMo6419 TP4/EP reused unchanged.

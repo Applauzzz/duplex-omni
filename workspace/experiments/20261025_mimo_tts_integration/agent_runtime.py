@@ -248,6 +248,7 @@ class AgenticMiMoChatProvider:
                     if finish_reason is None:
                         raise RuntimeError("MiMo Agent ended without finish_reason")
                     return text, [calls[index] for index in sorted(calls)], finish_reason
+
                 event = json.loads(data)
                 if not isinstance(event, dict) or event.get("error"):
                     raise RuntimeError("MiMo Agent returned an error event")

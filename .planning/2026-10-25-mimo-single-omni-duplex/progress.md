@@ -1,5 +1,16 @@
 # Progress Log
 
+## 2026-11-10: Agent Framework Capability Explanation
+- User requests architecture explanation, not implementation. Read selected
+  plan and current Python/TS adapter, agent definitions, page, background
+  references and installed SDK execution handlers. Submodules remain clean.
+  Preserve existing agent_runtime.py whitespace change and untracked drafts.
+- Explain actual SDK execution/events versus application-owned model loop,
+  history/voice policy/background/Mac bridge; distinguish partial runtime
+  harness from persistent planning/execution/evaluation capabilities.
+- Official docs fetch unavailable; no claim of latest SDK behavior.
+  Record findings only; no code edits, tests, runtime changes or publication.
+
 ## 2026-11-10: VAED Polling Publication
 - User authorizes commit/push on feature/svad-vaed-polling, baseline8352472.
   Scope: existing polling/config/UI/tests, Chinese handoff/docs and plan records.
