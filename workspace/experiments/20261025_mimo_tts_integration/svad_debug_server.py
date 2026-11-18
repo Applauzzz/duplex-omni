@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 import time
 import uuid
+from dataclasses import replace
 from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
@@ -77,9 +78,15 @@ def load_local_settings(path: Path) -> dict[str, object]:
     }
     semantic_config = {key: value for key, value in raw_config.items() if key not in app_config_names}
     server_policy = payload.get("server_policy", {})
-    if not isinstance(server_policy, dict) or set(server_policy) - {"vaed_mode", "vaed_window_ms"}:
-        raise ValueError("SVAD server_policy only supports vaed_mode and vaed_window_ms")
-    semantic_config.update(server_policy)
+    if not isinstance(server_policy, dict) or set(server_policy) - {
+        "vaed_mode", "vaed_window_ms", "interrupt_policy",
+    }:
+        raise ValueError("Invalid SVAD server_policy fields")
+    interrupt_policy = server_policy.get("interrupt_policy", "playback")
+    if interrupt_policy not in ("playback", "new_user_turn"):
+        raise ValueError("interrupt_policy must be playback or new_user_turn")
+    semantic_config.update({key: value for key, value in server_policy.items()
+                            if key != "interrupt_policy"})
     config = SemanticVADConfig.from_mapping({"type": "semantic_vad", **semantic_config})
     prompts = {}
     prompt_defaults = {
@@ -147,6 +154,7 @@ def load_local_settings(path: Path) -> dict[str, object]:
             "retain_interrupted_context": retain_interrupted_context,
             "history_turns": history_turns,
             "background_reasoning": background_reasoning,
+            "interrupt_policy": interrupt_policy,
             "threshold": config.threshold,
             "prefix_padding_ms": config.prefix_padding_ms,
             "silence_duration_ms": config.silence_duration_ms,
@@ -370,6 +378,7 @@ async def websocket(request):
     tts_playback_active = False
     active_response = None
     pending_decode = None
+    last_response = None
     response_settings = {
         "tts_enabled": bool(local_config["tts_enabled"]),
         "tts_reg_id": str(local_config["tts_reg_id"]),
@@ -383,6 +392,12 @@ async def websocket(request):
     send_lock = asyncio.Lock()
 
     async def send(payload):
+        if (last_response is not None
+                and payload.get("turn_id") == last_response["turn_id"]):
+            if payload.get("type") == "tts.done":
+                last_response["audio_done"] = True
+            elif payload.get("type") in {"chat.cancelled", "tts.cancelled"}:
+                last_response["cancelled"] = True
         if payload.get("type") in {"agent.mac.status", "agent.mac.m2.status"} and agent_config:
             tools = [item for item in agent_config.get("tools", [])
                      if item.get("function", {}).get("name") not in {*MAC_M2_FUNCTIONS, "demo_echo"}]
@@ -464,12 +479,15 @@ async def websocket(request):
         active_response = None
         if turn_id is not None:
             event_type = "tts.cancelled" if text_done else "chat.cancelled"
-            if active or had_tts:
+            invalidate = (reason == "new_user_turn" and last_response is not None
+                          and not last_response["cancelled"])
+            if active or had_tts or invalidate:
                 await send({
                     "type": event_type,
                     "turn_id": turn_id,
                     "reason": reason,
                     "retained": retained,
+                    "audio_done": bool(last_response and last_response["audio_done"]),
                     "interruption_marker": INTERRUPTION_MARKER if retained else None,
                 })
 
@@ -732,6 +750,8 @@ async def websocket(request):
     def start_chat(turn_id, audio_chunks):
         nonlocal chat_turn_id, chat_task, chat_tts_enabled, chat_text_done
         nonlocal turn_background_result, turn_result_only
+        nonlocal last_response
+        last_response = {"turn_id": turn_id, "audio_done": False, "cancelled": False}
         turn_background_result = background.result()
         turn_result_only = not audio_chunks and bool(turn_background_result)
         chat_turn_id = turn_id
@@ -886,6 +906,7 @@ async def websocket(request):
                         "max_buffered_chunks": config.max_buffered_chunks,
                         "vasd_window_ms": config.vasd_window_ms,
                         "vaed_mode": config.vaed_mode,
+                        "interrupt_policy": local_config["interrupt_policy"],
                         "vaed_window_ms": config.vaed_window_ms,
                         "sem_probability_threshold": config.sem_probability_threshold,
                         "sem_margin_threshold": config.sem_margin_threshold,
@@ -1108,6 +1129,8 @@ async def websocket(request):
                 await cancel_chat("agent_interrupt")
                 continue
             if event_type == "playback.state":
+                if local_config["interrupt_policy"] == "new_user_turn":
+                    continue
                 tts_playback_active = bool(payload.get("active"))
                 if not tts_playback_active:
                     await maybe_start_pending()
@@ -1121,6 +1144,7 @@ async def websocket(request):
                 history.clear()
                 agent_config.clear()
                 pending_decode = None
+                last_response = None
                 tts_playback_active = False
                 await send({"type": "reset", "session_id": session_id})
                 continue
@@ -1171,7 +1195,13 @@ async def websocket(request):
                     "avad": adapter.last_avad,
                 })
                 continue
-            if output.interrupt:
+            if (local_config["interrupt_policy"] == "new_user_turn"
+                    and output.event == InputEvent.PREFILL
+                    and last_response is not None and not last_response["cancelled"]):
+                pending_decode = None
+                await cancel_chat("new_user_turn")
+                output = replace(output, interrupt=True, interrupt_decision=True)
+            elif output.interrupt:
                 await cancel_chat("semantic_break")
             await send({
                 "type": "transition",

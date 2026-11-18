@@ -213,6 +213,63 @@ class FailingTTSProvider(TTSProvider):
 
 
 class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_user_turn_interrupts_without_playback_feedback(self):
+        for completed in (False, True):
+            with self.subTest(completed=completed):
+                self.settings["server_policy"] = {"interrupt_policy": "new_user_turn"}
+                self.config_path.write_text(json.dumps(self.settings), encoding="utf-8")
+                blocking = BlockingChatProvider()
+                self.app["chat_provider"] = self.chat if completed else blocking
+                class Acoustic:
+                    values = iter((True, True, False, True, False))
+                    previous = False
+                    def process_base64(self, *_args, **_kwargs):
+                        active = next(self.values)
+                        stopped = self.previous and not active
+                        self.previous = active
+                        return SimpleNamespace(speech_active=active, speech_stopped=stopped)
+                    def reset(self):
+                        pass
+                self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+                    SemanticRealtimeAdapter(config, provider, vad=Acoustic()))
+                async with asyncio.timeout(5):
+                    async with self.client.ws_connect(self.server.make_url("/ws")) as ws:
+                        await ws.send_json({"type": "configure", "tts_enabled": completed,
+                                            "interrupt_policy": "playback"})
+                        configured = await ws.receive_json()
+                        self.assertEqual(configured["config"]["interrupt_policy"], "new_user_turn")
+                        audio = {"type": "audio", "format": "pcm16", "sample_rate_hz": 16000,
+                                 "audio": base64.b64encode(b"\1\0" * 3200).decode()}
+                        for _ in range(3):
+                            await ws.send_json(audio)
+                            self.assertEqual((await ws.receive_json())["type"], "transition")
+                        started = await ws.receive_json()
+                        self.assertEqual(started["type"], "chat.started")
+                        if completed:
+                            while (await ws.receive_json())["type"] != "tts.done":
+                                pass
+                        else:
+                            self.assertEqual((await ws.receive_json())["type"], "chat.delta")
+                        # Even stale playback=true must not gate this server-owned policy.
+                        await ws.send_json({"type": "playback.state", "active": True})
+                        await ws.send_json(audio)
+                        cancelled = await ws.receive_json()
+                        self.assertIn(cancelled["type"], ("chat.cancelled", "tts.cancelled"))
+                        self.assertEqual(cancelled["turn_id"], started["turn_id"])
+                        self.assertEqual(cancelled["reason"], "new_user_turn")
+                        self.assertEqual(cancelled["audio_done"], completed)
+                        transition = await ws.receive_json()
+                        self.assertTrue(transition["transition"]["interrupt"])
+                        self.assertFalse(transition["transition"]["playback_active"])
+                        if not completed:
+                            await blocking.cancelled.wait()
+                            self.app["chat_provider"] = self.chat
+                        await ws.send_json(audio)
+                        event = await ws.receive_json()
+                        self.assertEqual(event["type"], "transition")
+                        self.assertEqual(event["transition"]["fsm_event"], "DECODE")
+                        self.assertEqual((await ws.receive_json())["type"], "chat.started")
+
     async def test_chunk_vaed_config_and_websocket_gate(self):
         self.settings["server_policy"] = {"vaed_mode": "chunk"}
         self.settings["config"]["vaed_window_ms"] = 8000
