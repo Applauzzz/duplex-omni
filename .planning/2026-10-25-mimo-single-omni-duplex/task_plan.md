@@ -8,6 +8,11 @@ Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
 November23 user authorizes commit/push Qwen and WeMM compatibility.
+Published parent implementation1c131b81997a849331bace56222af249c3408443
+on origin/模型兼容; native patchf5cbb8af06 on origin/duplex-stage2.
+Upstream set; publication gates met. Records-only receipt follows.
+Next listening intent instruction correction requires separate implementation
+and controlled acceptance; no prompt fix included in this publication.
 Publish native WeMM patch on vllm-src duplex-stage2 first, then parent
 model compatibility code/tests/docs and gitlink on 模型兼容; no force/merge.
 Exclude unrelated main config edits, online backup docs and temporary files.

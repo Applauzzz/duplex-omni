@@ -15,6 +15,12 @@
   Submodule push completed0:origin/duplex-stage2 ba860768a9..f5cbb8af06.
   Parent staged16 scoped files and exact published gitlink; cached check passed.
   Parent commit/push next. No force push, branch switch, merge or restart.
+- Parent implementation committed1c131b81997a849331bace56222af249c3408443;
+  env.sh outside sandbox push completed0, new origin/模型兼容 created and
+  upstream set. Exact native submodule commit already published first.
+  Submodule clean; parent remaining edits only excluded config/online docs/tmp.
+  Records-only followup records these receipts. Services unchanged; listening
+  intent conflict still open, no merge to main or universal quality claim.
 
 ## 2026-11-23: User Requests Two WeMM Checks
 - Explicit selected plan; read records, code and live run UI/raw SSE, parent diff.
