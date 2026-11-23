@@ -1,5 +1,171 @@
 # Findings & Decisions
 
+## 2026-11-23: WeMM Listening And Classifier Inspection
+- Read-only live UI/raw SSE inspection:21 completed Chat streams,20answers/
+  1exact listening; includes deployment probes, not an intent-quality dataset.
+  Sample answer treats being called 雨虹 as mistaken naming, answers dinner
+  invitation instead of ignoring background speech. Original inputs not logged.
+- Shared CHAT_AUDIO_INSTRUCTION asserts every admitted audio is a user question
+  directed at assistant and asks direct answer. This conflicts with system
+  intent rejection and biases answering; no controlled causal replay yet.
+  VASD intentionally admits intelligible speech addressed to others; only Chat
+  decides interaction intent. Thirty-turn history repeats this user instruction.
+- Live classifier logs:VASD有24/无10,VAED未84/已52,no semantic error markers.
+  Application max_tokens1/allowed_token_ids/candidate logprobs and strict sampled
+  code/argmax validation intact. One-token format does not ensure semantic quality.
+
+## 2026-11-23: WeMM Web Integration
+- Existing backbone abstraction reuses MiMo provider contracts with dynamically
+  resolved WeMM classifier IDs; no semantic FSM modification required.
+  WeMM Chat explicitly sends enable_thinking=False, unlike current Qwen Chat.
+- Thirty retained turns require31audio request limit. Startup maxlen32768/
+  TP2/GPU4,5/memory0.65 succeeded. History uses application strings, so
+  three-token ⏸ needs accurate prompt wording, not checkpoint mutation.
+- Same-connection two-turn real WS accept passed and both TTS streams overlap
+  Chat decode. Reset emits cancellation before reset; clients/tests must drain
+  by event type rather than assume immediate reset next-frame ordering.
+- Existing8080 MiMo deployment is separate and unchanged. WeMM8081 uses
+  new run-local config snapshot; editing main config does not affect this instance.
+
+## 2026-11-23: WeMM Port Baseline
+- Official source pinned at6cefad232b94e3e190d747251f35799b8b142213.
+  Selected0.31.0 overlay; local vllm baseba860768, torch2.13.0+cu129,
+  transformers5.14.1. Existing default import points to sibling vllm-src,
+  so tests need explicit current-source path plus compiled donor extensions.
+- Eleven independent WeMM modules imported without overwriting existing files.
+  chat_utils increment extracted against exact official v0.31.0 baseline;
+  git apply --check passed. Registry/config add only WeMM changes, not unrelated
+  Gemma/LiLiCorr updates. Dense/MoE architecture normalization is required.
+- GPU0-3 occupied about89GiB each;GPU4-6 empty andGPU7 minor allocation.
+  No existing service stopped. Official repository has no tests directory;
+  focused local contract tests must be added rather than claimed upstream.
+- Actual checkpoint processor probe passed full parse/apply on1s synthetic
+  waveform:audio_feature fields and308-token audio placeholder produced.
+  Four labels are single tokens:有95762/无95979/已96221/未96449.
+  ⏸ is three tokens158,237,116, not a compatible single-token history marker.
+  Do not reuse MiMo/Qwen IDs or claim history retention compatibility.
+
+## WeMM Support Inspection
+- Checkpoint /mnt/zehaoliu/user_whynotzhliu/modelbase/Omni/WeMM-Video-35BA3B
+  config architecture WeMMVideoForConditionalGeneration/model_type
+  wemm_qwen3_5_moe, Qwen3.5 MoE text/vision and Whisper+QFormer audio.
+- Current vllm-src/vllm-omni and deployed October26 registry have no WeMM
+  entry. Qwen3.5 support alone does not cover the custom audio encoder/processor.
+- Checkpoint README and official Tencent/WeMM-Video serving/patch READMEs:
+  BF16 supported via version-matched source overlays for vLLM0.18.0/0.31.0,
+  not demonstrated stock support. Overlay checks engine/source hashes.
+  Official serving audio example uses audio_url, unlike existing input_audio.
+- Model card reports local H20 modality generation, but serving guide says
+  downloaded-Hub GPU generation pending. These are distinct validation scopes;
+  no fresh local WeMM inference was attempted.
+- web search/open returned no content; approved env.sh+curl official raw
+  serving and patch documents succeeded. No runtime/checkpoint/source changes.
+
+## 2026-11-19: Video First-Turn Listening
+- Recent four fresh browser video sessions returned listening after VASD
+  admission/Chat with history0. Earlier video first turns also succeeded.
+  No original input retention, so exact user intent/audio completeness unknown.
+- Same3s recorded audio and synthetic gray JPEG, deployed prompt/false/temp0:
+  first probe audio-only answers, video-first listens, audio-first answers.
+  Reverse repeat audio-first listens and video-first answers. Ordering-only
+  fix hypothesis rejected by repeat; no runtime patch.
+- Independent stateless Chat reproduces video listening without FSM/browser.
+  This rules out FSM as necessary for this synthetic reproduction, not every
+  live capture timing issue. Deterministic intent classification not guaranteed
+  by temperature0; model policy versus engine variability remains unresolved.
+- Artifacts20261119T130049Z_video_first_qjwqdn2z and
+  20261119T130150Z_video_first_zcrv99ul; five bounded requests, no TTS or
+  live browser state change. Real failing audio/video needed for causal replay.
+
+## 2026-11-19: New Online Node Runtime
+- New business interface28.29.218.121 is distinct from retired28.29.217.180.
+  Current checkout is dirty Qwen compatibility development; serving it would
+  not preserve requested online cancellation. Export457a7bbc separately.
+- Actual serving config is the new run snapshot, not main experiment JSON.
+  Preserve old deployment's300ms chunk and30turn history. new_user_turn
+  cancellation is independent of playback feedback on accepted PREFILL.
+- Available compiled runtime extension is vllm._C_stable_libtorch, not _C;
+  import identity must be verified before startup rather than inferred.
+- Model loader/compile progressing through graph capture. UI alone being
+  reachable and external TTS healthy do not prove model readiness.
+- At12:40:40UTC dependencies both ready; real WS voice yields semantic_complete
+  Decode,26text deltas/9PCM chunks403680bytes24kHz, normal terminals and
+  clean Chinese raw content/empty reasoning. This short cold reply has first
+  audio after chat.done, so not a live overlap or latency acceptance.
+
+## 2026-11-19: Node180 Thinking Diagnostic
+- Actual hostname -I includes28.29.217.180. MiMo42095 still uses October26
+  runtime, TP4/EP, --reasoning-parser mimo, model MiMo-V2.6-Flash-RL8090;
+  UI1404559 still uses November12 online config snapshot8080.
+  Shared checkout branch is model compatibility, not evidence of loaded UI.
+- Live /tokenize with deployed Chat prompt verifies false suffix contains
+  <think></think> (1216tokens); true omits it (1214tokens). Thus live model
+  template recognizes false; no model restart or checkpoint change.
+- Independent text-only "stop Xiaowei", empty history, deployed prompt,
+  temperature0/max128/stream/false returns content=listening, reasoning empty,
+  role/content delta fields, stop and DONE. Original audio/history not replayed.
+  Artifact20261119T113306Z_mimo180_thinking_d5v8a2wz under workspace/logs.
+  Does not establish original request's effective prompt or fix leakage.
+- Runtime mimo parser maps to Qwen3ParserReasoningAdapter; application baseline
+  yields only delta.content. No evidence of app concatenating reasoning field.
+  Need original-session raw SSE/audio and history before assigning leakage
+  to model正文 versus template/request/parser handling. No service changes.
+
+## 2026-11-19: Intranet Playback Admission Race
+- Read-only analysis of217.68 demo: interruption is evaluated once at
+  Judge->Listen, using playback state snapshotted before the VASD await.
+  Listen does not reconsider interruption. At DECODE, unfinished chat/TTS
+  or active playback queues pending_decode; task completion and playback=false
+  both retry starting it. Thus admission before first playback report can
+  miss interruption and wait behind audio that starts during Listen.
+- Live shared log session svad-57c0469e2e5f, UTC08:13:35.767 starts209;
+  08:13:36.160 admits next input with play=false/interrupt=false,
+  08:13:36.740 TTS209 done,08:13:37.367 DECODE213,
+  08:13:43.382 starts213 (6.015s later). Matches queued response symptom.
+  No playback receive/cancel events recorded, so exact browser timing is not
+  established. Listen/DECODE playback_active=false is a default field here,
+  not evidence of actual browser inactivity. Judge field is the relevant gate.
+- Normal play=true/interrupt=true admissions also occur in today's log.
+  Candidate policy: accepted PREFILL cancels the prior response independently
+  of playback; don't move cancellation to every CHUNK_PREFILL.
+  User requested analysis only, no runtime/code/policy change.
+
+## 2026-11-18: Qwen Chat Template Override Trial
+- With enable_thinking=false the rendered generation suffix contains empty
+  think delimiters; the older Qwen duplex path did not pass this override.
+- Same audio/prompt/history/model/temperature0 A/B: false produces Assistant:
+  prefix; omitting override produces clean Chinese text. Post-reload WS also
+  produces clean text and overlapping streaming TTS. Evidence supports
+  removing this override for Qwen Chat, not asserting every role-label case
+  is fixed. Earlier raw browser captures also contained user and assistant
+  labels inside delta.content; those scenarios still need fresh validation.
+- Only Qwen Chat omits the override. MiMo and semantic classifiers keep their
+  existing request format. Native thinker engine remains active, not a switch
+  to vllm-omni stage orchestration.
+
+## 2026-11-18: Raw SSE Role Label Evidence
+- Raw vLLM response capture, before application UTF8/JSON parsing:
+  role=assistant/content="" initial frame, then content="Assistant" and ":".
+  Application is not converting delta.role to text for this captured case.
+  Does not determine whether model/template/upstream generation handling is
+  responsible; User: reproduction remains open.
+
+## 2026-11-18: Qwen Thinker Compatibility
+- Installed vllm-omni general plugin unconditionally overwrites native Qwen
+  registry (engine/arg_utils.py register_omni_models_to_vllm). Plain vllm CLI
+  alone does not guarantee native thinker. Use VLLM_PLUGINS="" for isolated
+  thinker process; first real startup exposed deepstack meta/CUDA mismatch
+  inside vllm-omni wrapper during profiling.
+- Local Qwen3-Omni-30B-A3B-Instruct tokenizer encodes 有/无/已/未 as
+  18830/42192/36667/38342 respectively; all one token, coincidentally same
+  IDs as MiMo. Interruption marker ⏸ is also one token,149660.
+- Current vllm-src registry maps Qwen3OmniMoeForConditionalGeneration to
+  Qwen3OmniMoeThinkerForConditionalGeneration, not a talker pipeline.
+- GPU query reports eight empty H20 GPUs on this host; not evidence that
+  remote historical demos are stopped. No inference startup yet.
+- Official web search returned no usable results; local source/model assets
+  are the implementation evidence, not a claim about latest upstream support.
+
 ## 2026-11-09: Intranet Node Reload
 - Current node businessIP28.29.217.68 matches intranet02 manifest, not previous
   localhost node28.29.218.56. Healthy MiMo6419 TP4/EP reused unchanged.

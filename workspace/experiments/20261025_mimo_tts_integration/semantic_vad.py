@@ -6,15 +6,18 @@ import asyncio
 import base64
 import binascii
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from enum import Enum
 import io
 import json
 import logging
 import math
+from pathlib import Path
 import time
 from typing import Protocol
 import wave
+import uuid
 
 import cv2
 import numpy as np
@@ -1070,10 +1073,17 @@ CHAT_VIDEO_AUDIO_INSTRUCTION = (
 class MiMoSemanticVADProvider:
     """Use the existing MiMo audio chat endpoint for VASD and VAED."""
 
-    def __init__(self, client, mimo_url: str, *, model: str = "mimo-v2.6-flash") -> None:
+    def __init__(self, client, mimo_url: str, *, model: str = "mimo-v2.6-flash",
+                 code_token_ids=None) -> None:
         self.client = client
         self.mimo_url = mimo_url.rstrip("/")
         self.model = model
+        self.code_token_ids = dict(_CODE_TOKEN_IDS if code_token_ids is None else code_token_ids)
+        if (set(self.code_token_ids) != set(_CODE_TOKEN_IDS)
+                or any(not isinstance(value, int) or value < 0
+                       for value in self.code_token_ids.values())
+                or len(set(self.code_token_ids.values())) != len(_CODE_TOKEN_IDS)):
+            raise ValueError("Classifier requires four distinct single-token code IDs")
 
     async def decide_sem(self, audio_chunks, *, context):
         result = await self._classify(
@@ -1105,7 +1115,7 @@ class MiMoSemanticVADProvider:
 
     async def _classify(self, audio_chunks, *, system, request_kind, code_map, context):
         wav = audio_chunks_to_wav(audio_chunks)
-        token_ids = [_CODE_TOKEN_IDS[code] for code in code_map]
+        token_ids = [self.code_token_ids[code] for code in code_map]
         payload = {
             "model": self.model,
             "messages": [
@@ -1203,10 +1213,13 @@ def _prompt_from_context(context: Mapping[str, object], key: str, default: str) 
 class MiMoChatProvider:
     """Stream text replies from the same MiMo backbone after an FSM DECODE."""
 
-    def __init__(self, client, mimo_url: str, *, model: str = "mimo-v2.6-flash") -> None:
+    def __init__(self, client, mimo_url: str, *, model: str = "mimo-v2.6-flash",
+                 raw_sse_log_dir=None, enable_thinking=False) -> None:
         self.client = client
         self.mimo_url = mimo_url.rstrip("/")
         self.model = model
+        self.raw_sse_log_dir = Path(raw_sse_log_dir) if raw_sse_log_dir else None
+        self.enable_thinking = enable_thinking
 
     async def stream_reply(self, audio_chunks, *, history, prompt, context):
         messages = build_chat_messages(
@@ -1218,8 +1231,9 @@ class MiMoChatProvider:
             "max_tokens": 512,
             "temperature": 0.0,
             "stream": True,
-            "chat_template_kwargs": {"enable_thinking": False},
         }
+        if self.enable_thinking is not None:
+            payload["chat_template_kwargs"] = {"enable_thinking": self.enable_thinking}
         async with self.client.post(
             self.mimo_url + "/v1/chat/completions",
             json=payload,
@@ -1228,23 +1242,32 @@ class MiMoChatProvider:
             if response.status != 200:
                 body = await response.read()
                 raise RuntimeError(f"MiMo Chat HTTP {response.status}: {body[:200]!r}")
-            finish_reason = None
-            async for data in _sse_data(response.content):
-                if data == "[DONE]":
-                    if finish_reason is None:
-                        raise RuntimeError("MiMo Chat ended without finish_reason")
-                    return
-                event = json.loads(data)
-                if not isinstance(event, dict) or event.get("error"):
-                    raise RuntimeError("MiMo Chat returned an error event")
-                for choice in event.get("choices", []):
-                    delta = choice.get("delta", {})
-                    text = delta.get("content")
-                    if isinstance(text, str) and text:
-                        yield text
-                    reason = choice.get("finish_reason")
-                    if reason is not None:
-                        finish_reason = reason
+            raw_path = None
+            if self.raw_sse_log_dir is not None:
+                self.raw_sse_log_dir.mkdir(parents=True, exist_ok=True)
+                raw_path = self.raw_sse_log_dir / f"chat-{uuid.uuid4().hex}.sse"
+            with raw_path.open("xb") if raw_path else nullcontext(None) as raw_log:
+                if raw_path:
+                    raw_path.chmod(0o600)
+                    LOG.info("chat_raw_sse request_id=%s model=%s status=%s path=%s",
+                             request_id, self.model, response.status, raw_path)
+                finish_reason = None
+                async for data in _sse_data(response.content, raw_log=raw_log):
+                    if data == "[DONE]":
+                        if finish_reason is None:
+                            raise RuntimeError("MiMo Chat ended without finish_reason")
+                        return
+                    event = json.loads(data)
+                    if not isinstance(event, dict) or event.get("error"):
+                        raise RuntimeError("MiMo Chat returned an error event")
+                    for choice in event.get("choices", []):
+                        delta = choice.get("delta", {})
+                        text = delta.get("content")
+                        if isinstance(text, str) and text:
+                            yield text
+                        reason = choice.get("finish_reason")
+                        if reason is not None:
+                            finish_reason = reason
             raise RuntimeError("MiMo Chat disconnected before DONE")
 
 
@@ -1368,9 +1391,12 @@ def video_chunks_to_jpeg_sequence(audio_chunks: Sequence[object]) -> str | None:
     return ",".join(encoded_frames)
 
 
-async def _sse_data(stream):
+async def _sse_data(stream, *, raw_log=None):
     fields: list[str] = []
     async for raw in stream:
+        if raw_log is not None:
+            raw_log.write(raw)
+            raw_log.flush()
         line = raw.decode("utf-8").rstrip("\r\n")
         if not line:
             if fields:

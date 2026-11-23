@@ -22,6 +22,8 @@ MiMo-V2.6-Flash-RL 是唯一的多模态理解与回复生成模型；Qwen3-TTS 
 
 | 文件 | 内容 |
 |------|------|
+| [wemm_web_20261123.md](wemm_web_20261123.md) | WeMM 独立 VAD 网页、配置与日志、真实两轮流式 TTS 验收 |
+| [wemm_port_20261123.md](wemm_port_20261123.md) | WeMM 原生 vLLM 移植、分类 token 差异和独立验收边界 |
 | [standalone_vad_mimo_tts_start_20261103.md](../standalone_vad_mimo_tts_start_20261103.md) | 普通 VAD+MiMo+外部 TTS 启动交接：配置目录、runtime、端口、SSH 与验收 |
 | [checkpoint_20261026.md](checkpoint_20261026.md) | 当前基础集成成果、聚焦测试、正常停服和恢复方式 |
 | [checkpoint_20261026.json](checkpoint_20261026.json) | 版本、配置/代码摘要、测试与验收边界清单 |

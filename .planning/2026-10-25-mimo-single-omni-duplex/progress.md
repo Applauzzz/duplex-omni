@@ -1,5 +1,387 @@
 # Progress Log
 
+## 2026-11-23: Authorized Model Compatibility Publication
+- Selected plan recovered; inspected parent/submodule remotes/status/diffs.
+  Parent 模型兼容, vllm-src duplex-stage2; both remotes Applauzzz on GitHub.
+  Stage only Qwen/WeMM application adapter, tests/probes, model docs/records
+  and native WeMM port/gitlink. Main config edits and online backup docs/tmp
+  remain local, not reverted. Services remain running.
+- Both parent/submodule diff --check passed. Fresh five-case application
+  validation underway with env.sh+omni/current runtime. Native GPU and focused
+  engine acceptance from this session retained; no broad safety suite rerun.
+- Fresh application verification completed0,5/5 in73.485s. Native WeMM
+  submodule committed f5cbb8af06a9b218aef8342dd3341f5aea52d201,
+ 20files including source attribution and three focused engine suites.
+  Submodule push completed0:origin/duplex-stage2 ba860768a9..f5cbb8af06.
+  Parent staged16 scoped files and exact published gitlink; cached check passed.
+  Parent commit/push next. No force push, branch switch, merge or restart.
+
+## 2026-11-23: User Requests Two WeMM Checks
+- Explicit selected plan; read records, code and live run UI/raw SSE, parent diff.
+  No code/config/service changes. Parsed logs with python-B structured JSON;
+ 21completed SSE/20answers/1listening including acceptance probes.
+- Found assistant-directed-question suffix conflicts with intent-rejection SP.
+  Current VASD intentionally includes other-directed meaningful speech; do not
+  conflate 无 with Chat listening. Sample replies confirm observed background
+  speech admission issue but original audio unavailable for causal validation.
+- Classifier hard one-token request and strict candidate/argmax checks verified,
+  actual checkpoint IDs from prior fresh processor probe retained. No new GPU
+  calls or restart, and no claim classifier semantic accuracy is guaranteed.
+
+## 2026-11-23: WeMM VAD Web Deployment
+- Recovered selected plan and read native GPU acceptance and Qwen app records.
+  Parent dirty model compatibility work preserved; vllm-src port dirty,
+  vllm-omni clean. BusinessIP28.29.216.252; GPU4/5 empty, existing MiMo4577
+  and8080 deployment retained. Application currently accepts only MiMo/Qwen.
+- Scope recorded before edits: add WeMM backbone and display identity only,
+  no FSM changes; use run-local config preserving300ms/256ms/128ms/history30.
+  Actual WeMM marker is three tokens; correct snapshot wording, not tokenizer.
+- env.sh+omni launch completed0, verified sys.executable/current vllm runtime
+  and_C_stable_libtorch. Unique run20261123T093134Z_wemm_web_t4yccipa,
+  model201752/UI201753 detached;private8094/public8081, TP2/GPU4,5,
+  maxlen32768/audio31/max_num_seqs1. Existing4577/4578 intact.
+- Focused unittest command with omni/current runtime and vllm-omni passed5/5:
+  three WeMM selection/override/token validation, MiMo default and Qwen delta.
+  Initial real WS verification invocation was user-aborted before launch;
+  after continuation readiness/real two-turn validation started separately.
+  Readiness still pending; no completed voice/TTS acceptance claim.
+- Model/UI readiness passed and two real voice turns completed semantic_complete
+  Decode, Chat and TTS. Probe then failed assuming reset is the immediately next
+  event despite queued notifications. Preserve original live_events/readiness;
+  fix probe to await typed reset and create exclusive acceptance subdirectories.
+  No service/FSM patch from this probe failure; repeated test remains bounded.
+- Corrected probe completed0; acceptance_npss84y4 retains readiness/events/
+  summary/output. Same WS two turns both semantic_complete after AVAD stop:
+  50chat.delta/20tts.audio/826560PCM bytes, RMS0.09053, overlap true/true,
+  two chat.done/tts.done and typed reset passed. Existing service unchanged.
+  Command env.sh+omni python-B /tmp/check_wemm_web.py <run>, approved sockets.
+- model201752/UI201753 remain detached and serving; GPU4/5 each65381MiB.
+  Canonical Chinese launch/config/runtime/Chrome/acceptance document added.
+  Parent diff --check passed. No commit/push. Remote microphone/playback,
+  real interruption, long history capacity, thresholds/video/load open.
+
+## 2026-11-23: Authorized WeMM Patch Port
+- Recovered selected plan with explicit PLAN_ID/PWF_PLAN_ROOT and read current
+  records/stage README. Parent branch 模型兼容 is dirty with preserved Qwen work;
+  vllm-src clean at ba860768a965efadcf059089c04862c46e568242.
+- Scope is native vllm-src support, not replacement deployment or shared
+  environment installation. Official source download requested to independent
+  /tmp/wemm-port-20261123 for pinned comparison; no model service changes.
+- Download clone completed0. Copied11 new overlay modules no-clobber; extracted
+  chat_utils diff against officialv0.31.0 and git apply --check/apply passed.
+  Registry/config changes only WeMM. Local hooks differ: implemented
+  _apply_hf_processor_main/_get_hf_processor_text, local four-argument prompt
+  update and dummy builder hook; preserve original shared base classes.
+- Existing input_audio dispatch now uses WeMM connector only for WeMM.
+  Standard video/input_audio paths unchanged; custom paired type model-gated.
+  Added source attribution/LAVIS license and two focused five-case suites.
+- Current-source symlink runtime/tmp/wemm-runtime-20261123 merged missing donor
+  compiled/generated files only. Import WeMM MoE and_C_stable_libtorch passed.
+  Sandbox cannot initialize CUDA (304); CPU contract tests do not prove GPU.
+- Direct omni pytest failed: pytest absent. Test-only append of existing liu
+  site-packages avoids shared installs. First runs each4/5: fixture omitted
+  spatial_merge_size and hard-coded wrong placeholder key. Fixtures corrected.
+- First checkpoint probe failed writing read-only HF cache; rerun approved
+  with private HF_MODULES_CACHE, no model checkpoint or shared environment edits.
+- Fixed fixture reruns passed5/5 model contracts and5/5 chat dispatch;
+  syntax13files and vllm-src diff --check passed. Final dtype/CPU postprocessing
+  hook restored; only affected entrypoint test rerun underway.
+- Checkpoint probe initially assumed ⏸ single token and failed. Corrected probe
+  asserts only classification labels; ⏸ remains explicitly incompatible.
+  Full real config/tokenizer/1s synthetic audio processor apply completed0,
+  four decision IDs confirmed; no checkpoint modifications.
+- Isolated GPU probe authorized on emptyGPU4,5/private8094; exclusive run and
+  startup/cleanup ownership manifest,3requests (text/audio/SVASD) only.
+  Existing MiMo4577/UI4578 remain unchanged. Acceptance pending startup.
+- Final dtype entrypoint rerun1/1 passed. External additive Chinese document
+  publication completed0 with no-clobber; final GPU result will be a separate
+  additive snapshot, not overwriting published content.
+- GPU run20261123T083258Z_wemm_port_rr01k95d exited1 before model load:
+  local registry supplies cache keyword absent in official constructor.
+  Restored local cache passthrough and extended existing test (still5cases).
+  New isolated GPU attempt requested, previous model.log/exit retained.
+- Cache constructor focused rerun1/1 passed. SecondGPU run
+  20261123T083830Z_wemm_port_4lp6b00y loaded all17BF16 shards onTP2:
+  34.45GiB per worker, no missing weights. Failed encoder profiling because
+  upstream dummy builder emitted image/video only, no standalone audio.
+  Added30s audio dummy and extended existing test (still5/module).
+  Third isolated attempt underway; weight load is accepted, forward/SSE not yet.
+- Audio dummy targeted test1/1 passed. ThirdGPU run
+  20261123T084920Z_wemm_port_w58yj3l6 completed weight/profiling/KV startup and
+  text request:clean Chinese "一加一等于 2。",6content deltas/7transport chunks,
+  firstchunk0.983s/done1.428s. Audio request500 before forward: missingffmpeg.
+- Root cause environment lackslibrosa, TorchCodec decoding unavailable;
+  soundfile reads24k WAV but resampling fell through to missingffmpeg.
+  AddedWeMM-only scipy resample_poly fallback for missinglibrosa onWAV/FLAC.
+  No dependency install. Addedoneaudio regression; fourthGPU attempt underway.
+  Third owned server stopped normally;GPU4,5 empty,MiMo4577/UI4578 retained.
+- WAV resampling targeted test1/1 passed withoutlibrosa/ffmpeg.
+  FinalGPU run20261123T090228Z_wemm_port_f3fx8aht completed0:
+  text6delta/7transport chunks first0.478s/done0.903s;
+  real3sWAV7delta/8transport chunks first0.764s/done1.283s.
+  One-token semantics有 and both candidate logprobs returned,margin5.125.
+  These are HTTP times, not VAD endpoint/TTS overlap or quality acceptance.
+- Owned final server exited0;GPU4,5 empty, noWeMM processes. MiMo4577 andUI4578
+  retained. Parent/submodule diff --check passed. No commit/push/gitlink update.
+  Engine port gates met; application backbone/history/cancel/TTS/video/load
+  gates remain separate. Final canonical Chinese doc updated additively.
+
+## WeMM Support Assessment
+- Read user checkpoint config/README/custom modeling source and current
+  vllm/vllm-omni/deployed registry; no WeMM native registration found.
+  Parent dirty compatibility worktree and clean submodules preserved.
+- Official Tencent serving/patch documentation fetched with approved
+  env.sh+curl after web searches returned no content. Both calls completed0.
+  Documented version-specific patched vLLM0.18.0/0.31.0 BF16 paths.
+- Assessment only: no model load, tokenizer execution, GPU tests, environment
+  installation, service restart, branch switch, commit or push.
+  Next isolate matching patched environment, validate real audio/logprobs/
+  streaming/cancellation before adapting semantic VAD and Chat.
+
+## 2026-11-19: Third-Party LM API Branch
+- User requests a new branch for semantic VAD and Chat third-party LM APIs.
+  Created feature/third-party-lm-api at committed baseline2f9677b.
+  Current dirty model compatibility checkout was deliberately not switched:
+  Qwen source/config and all existing untracked artifacts remain unchanged.
+  New branch contains committed baseline only, not uncommitted Qwen changes
+  or independently exported online457a7bbc runtime.
+- Branch creation only; no implementation, test, service restart or push.
+  Next obtain endpoint/auth/model/audio format/stream and classification
+  logprobs capabilities before choosing provider contracts. Use isolated
+  worktree or user-approved checkpoint before switching dirty checkout.
+
+## 2026-11-19: Online Backup On216252
+- User moved to new node and requests a standby online service, not investigation
+  fixes. BusinessIP28.29.216.252, GPU0-3 empty, unrelatedGPU7 allocation retained.
+  No matching project service before launch;8080/8090 bind checks passed.
+  Dirty compatibility branch and clean submodules preserved.
+- /tmp/start_online_backup.py under env.sh+omni completed0. Actual interpreter,
+  runtime vllm and _C_stable_libtorch import verified; no dependency install.
+  Exported457a7bbc into exclusive baseline, cloned previous218121 config/SSE
+  wrapper without overwriting prior artifacts. Model4577/UI4578 detached.
+- Run workspace/logs/20261119T142806Z_online_backup_2829216252_f79e8d0n;
+  TP4/EP GPU0-3 loopback8090; page businessIP8080. Preserve300ms chunk/
+  history30/new_user_turn and external TTS29.213.195.135:8100.
+  Private raw output SSE on; no original input capture, Agent or Qwen startup.
+- Old /tmp/start_online_node.py/check_online_node.py missing on new node;
+  created new launch/check scripts instead. /tmp/check_online_backup.py now
+  waits initialization then same-Origin WS/config/reset and real WAV/PCM.
+  Readiness/audio acceptance not yet met. No video/think fixes or commit/push.
+- Verification session46266 exited0: both dependencies ready, page200,
+  same-Origin WS configure/reset passed. Real WAV oneChat28deltas/10audio
+  chunks407040bytesPCM, RMS0.094494, chat.done/tts.done passed.
+  firstaudio index45 follows chat.done42; short cold reply not overlap gate.
+  Artifacts readiness.json/live_summary.json/live_events.json/raw_sse retained.
+  Cold init included shared imports,147-155s weight loading,torch.compile and
+  first-node FlashInfer sampling compile; warnings continued, no fatal errors.
+  No broad tests rerun for unchanged exported implementation; fresh E2E only.
+  Owned model4577/UI4578 retained; no verification process still running.
+
+## 2026-11-19: Video First-Turn Rejection Investigation
+- User redirects thinking investigation to frequent video first-turn listening.
+  Recent four video sessions first Chat returns exact listening, history0;
+  earlier three video sessions respond normally. All reached Chat after
+  semantic admission. Not a demonstrated VASD admission failure.
+- Real browser inputs were not retained; raw SSE captures output only.
+  Do not claim exact audio/visual reproduction. Investigate with three bounded
+  independent requests: same3s fixture audio only, synthetic gray video first,
+  same media audio first. No live session mutation/restart or forced intent.
+- /tmp/probe_video_first_turn.py completed both runs0 under env.sh+omni;
+  imports pinned exported baseline. Five independent model requests total.
+  First A/B suggested media order, reverse repeat contradicted it; no order
+  fix applied, no forced first-turn answer or relaxed rejection prompt.
+  Artifacts20261119T130049Z_video_first_qjwqdn2z and
+  20261119T130150Z_video_first_zcrv99ul, private raw SSE and summary.
+  Audio fixture unchanged, gray frame synthetic, no TTS or live-session reset.
+  Exact browser failing input unavailable; need opt-in capture/replay to
+  distinguish intended rejection, clipped input and engine media variability.
+- Previous thinking investigation read actual runtime Qwen3 adapter:
+  false initializes CONTENT and nonstream extraction bypasses reasoning.
+  Captured browser turn20 contains reasoning text plus closing think inside
+  content. Further parser testing paused by user; not fixed.
+
+## 2026-11-19: Restore Online Service On218121
+- User reports old180 node killed and requests online-policy service on the
+  new node. Business IP28.29.218.121 confirmed; GPU0-3 initially empty.
+  Preserve unrelated GPU7 allocation, dirty model compatibility branch and
+  all three clean submodule worktrees. No branch switch or dependency install.
+- Exported committed457a7bbc87770868a188f599086b003920449377 to independent
+  run baseline. Runtime selected from20261026T105528Z_mimo_single_phase2_daaf8fb0,
+  with process-local current vllm-omni path and omni interpreter after env.sh.
+  First preflight attempted absent vllm._C; corrected to actual compiled
+  vllm._C_stable_libtorch and verified successful import before any launch.
+- Two focused DebugServiceTests passed2/2 in1.525s:
+  test_new_user_turn_interrupts_without_playback_feedback and
+  test_tts_streams_one_task_with_incremental_text. No broad fixture suite.
+- /tmp/start_online_node.py completed0; detached model4334 TP4/EP on private
+  8090, UI4335 on28.29.218.121:8080. External TTS29.213.195.135:8100 healthy.
+  Config copied without overwriting old deployment:300ms chunk/history30,
+  VASD/VAED8000ms/chunk, AVAD256ms/fallback128ms, new_user_turn.
+- Artifacts workspace/logs/20261119T121952Z_online_218121_9nxbk881:
+  launch.json, svad_config.json, baseline, model.log, ui.log and private raw_sse.
+  Wrapper logs Chat response bytes before parser; request/FSM unchanged.
+  No input audio/prompts captured by wrapper; capture files0600/directory0700.
+- /tmp/check_online_node.py is waiting for dependency readiness then real
+  same-Origin WS configure/reset and recorded-audio Chat/TTS acceptance.
+  Weight loading and torch.compile complete, CUDA graph warmup ongoing.
+  Cold startup/shared-storage delays are not counted as successful readiness.
+  Thinking leakage, remote browser playback and production load remain open.
+- Verification session83629 exited0. Health MiMo/TTS true at12:40:40UTC;
+  page200 and same-Origin WS configure/reset passed. Real float WAV
+  duplex_proxy_tt/my_question.wav converted in memory via soundfile/numpy,
+  ACK-paced300ms uploads stop on firstDECODE; no fixture modification.
+- Session svad-02dc7e77a3dc/turn10: VAED accepted complete with speech=false,
+  semantic_complete (not fallback). One Chat,26deltas,5tts.text,9tts.audio,
+  chat.done/tts.done and403680PCM bytes24kHz, RMS0.098975/peak0.891205.
+  Private live_events.json/live_summary.json/readiness.json retained in run.
+- Raw SSE chat-7a1b56c7cbf9479c9ae003e1eda78cb4.sse includes DONE, clean Chinese
+  content, empty reasoning field; wrapper associates false/history0 with turn10.
+  Original browser/history leak not reproduced, not a universal fix.
+- Actual firsttts.audio event index44 follows chat.done index41 for this short
+  cold answer. Do not count it as fresh text/TTS overlap acceptance.
+  One VAED request took15023ms during cold inference; no latency guarantee.
+  Warm longer reply/browser cancellation/load remain separate gates.
+- Added Chinese Doc/online-server/online_node_20261119.md and navigation link.
+  No application source edits, branch switch, commit or push. git diff --check
+  passed. Owned detached services retained; no verification sessions running.
+
+## 2026-11-19: Restore On180 And Diagnose Thinking
+- Used selected plan resolver; parent dirty model compatibility branch/config
+  preserved. Submodule gitlinks inspected; no source/runtime installation edits.
+  Actual MiMo42095 and UI1404559 confirmed by process commands and launch logs.
+- Sandbox /proc42095 environ/cwd/fd reads denied; approved read-only environment
+  retry verifies October26 runtime and omni interpreter. No environment dump
+  of credentials; selected path/runtime variables only.
+- env.sh initialized and omni activated for /tmp/probe_mimo180_thinking.py.
+  Two live tokenize calls and one bounded128token text-only Chat completed0.
+  No audio/TTS sent; no stateful browser session modified or service restarted.
+  Artifact workspace/logs/20261119T113306Z_mimo180_thinking_d5v8a2wz:
+  raw.sse0600, summary.json, interpreter/config/template tails/result recorded.
+- False template actual tail <think></think>; true lacks it. Empty-history
+  deployed prompt text input returns listening with no reasoning and DONE.
+  Original audio/old history leakage remains unreplicated; no fix claim.
+  Current UI has no raw logging switch, so original content unavailable in
+  service.log. Reproduction/capture requires a separate approved next step.
+
+## 2026-11-19: Intranet Missed Interruption Analysis
+- Recovered selected plan and inspected dirty parent without edits to code.
+  User reports speaking during TTS without interruption, next Chat delayed
+  until playback ends. Read current playback-gated baseline and shared live
+  workspace/logs/20261109_intranet_chunk_rzxilUYm/svad-ui_chunk01.log.
+- Structured Node JSON extraction correlated FSM and Chat for one session:
+  next admission false at08:13:36.160, DECODE213 at08:13:37.367,
+  Chat213 starts08:13:43.382, six-second queue wait; previous209 TTS had
+  finished generation08:13:36.740. Separate normal interrupts are present.
+  Do not equate TTS generation completion with playback completion, or
+  Listen's default playback field with actual playback state.
+- No client playback/cancel receive telemetry for definitive timing; no
+  exact user session supplied. Suggested admission-time prior-response
+  cancellation is analysis, not implemented or deployed. No tests, audio
+  requests, service restart, commit/push. Existing config edits preserved.
+
+## 2026-11-18: Remove Qwen Chat Thinking Override
+- User requests removing enable_thinking=false for a controlled trial.
+  Qwen Chat now omits chat_template_kwargs entirely; MiMo Chat and semantic
+  one-token VASD/VAED retain false. No prompt, role-label filtering, FSM,
+  checkpoint, model process or serving-engine migration.
+- Focused test_backbone tests test_qwen_stream_is_incremental and
+  test_mimo_default_preserved passed2/2 in84.932s under env.sh+omni,
+  experiment/current runtime/current vllm-omni PYTHONPATH as above.
+- /tmp/qwen_thinking_ab.py used the same first3s audio, Chat prompt,
+  empty history, temperature0 and model. False generated "Assistant: ...";
+  omitted generated a normal Chinese reply without role labels (25 versus
+  29 deltas). Artifacts: workspace/logs/20261118_qwen_thinking_ab_an72yp3h.
+  This isolates the parameter for one sample, not universal correctness.
+- Reloaded only owned UI56326 ->63515; current run
+  workspace/logs/20261118T172800Z_qwen_sse_y04h0fwm, raw SSE stays enabled.
+  Model37788, external TTS, config snapshot and28.29.218.211:8080 preserved.
+- /tmp/probe_qwen_live_20261118.py completed0 after startup readiness waits:
+  WS session svad-beb0f0777631,29chat.delta,11tts.audio,462000PCM bytes,
+  chat.done and tts.done. Chinese text has no Assistant/user prefix or
+  exposed thinking; first_audio1.9189s < chat_done2.9857s,
+  tts.done3.2562s. ACK-paced and stops at firstDecode, not endpoint benchmark.
+  Artifacts: workspace/logs/20261118T154532Z_qwen_wpe3imxu/
+  single_turn_trnj5__6/live_summary.json, live_events.json, live_output.pcm.
+- Initial artifact inspection used summary.json rather than live_summary.json
+  and failed; rg --files located the actual retained artifact.
+  No running verification tool session remains. No commit/push.
+  Browser user-only reproduction, cancel/history/load/semantic quality remain.
+
+## 2026-11-18: Raw Chat SSE Observation
+- Focused unittest4/4 passed73.263s under env.sh+omni/current experiment
+  and verified runtime PYTHONPATH; git diff --check passed.
+  Reloaded only UI23631 ->56326, run20261118T170745Z_qwen_sse_nfef3o5f.
+  Kept model37788/TTS/config snapshot. UI startup dependency import delayed
+  readiness; probe waited then passed25deltas/10audio/466800bytesPCM.
+- Raw capture chat-ac55495f5b95473583be9750178e90c6.sse confirms first
+  delta.role=assistant/content="", then content="Assistant", then content=":".
+  Labels already present upstream of application SSE parser; not evidence
+  of role-field concatenation. User: still needs matching real capture.
+  Logging remains enabled for subsequent browser turns; no Prompt/filter fix.
+- User requests enabling parser-before raw SSE capture to diagnose role labels.
+  Scope: opt-in plain Chat --raw-sse-log-dir, one exclusive file per request,
+  exact response-content bytes before UTF8/JSON parsing, flushed per line.
+  Request ID/model/status/file association in UI log; private files0600 and
+  run directory0700. No input audio/prompts capture, filtering or FSM change.
+  Reload only owned UI23631, preserve model37788/externalTTS/current config.
+
+## 2026-11-18: Qwen Thinker Compatibility
+- Native retry succeeded: model37788, GPU workers42757-42760, run
+  20261118T161533Z_qwen_native_kjocsx5z. Native registry enforced with
+  VLLM_PLUGINS=""; UI23631 preserved. Weights105.53s, GPU init267.16s.
+  Optional DeepGEMM GLIBCXX warning continued with Triton; shared-memory
+  waits corresponded to verified ninja/nvcc/ptxas sampling compilation.
+- Temporary /tmp/probe_qwen_live_20261118.py under env.sh+omni initially
+  exceeded900s readiness (includes first failed attempt), then float WAV
+  format3 failed wave reader. Extended waiting; soundfile in-memory PCM16
+  conversion, no fixture/checkpoint/config edit. jq unavailable; used logs.
+- Health model/TTS true; business-IP root200; same-Origin WS configured.
+  Real200ms VASD/VAED candidate logprobs accepted and semantic_complete
+  with AVAD inactive decoded. First probe had two turns from fixture pause;
+  followup stops input at firstDecode, single_turn_cz3cgjnm passed:
+  oneChat,25deltas,10audio chunks,466800bytesPCM, both terminal events.
+  first_audio3.154s < chat_done4.6199s, tts_done4.951s. Probe ACK-paced,
+  not real-time latency benchmark. Test script sessions all exited.
+- Active config is startup snapshot in first run, history30/chunk200/
+  windows8000/AVAD256/fallback128. HTTP demo28.29.218.211:8080.
+  Known actual reply Assistant: prefix reaches TTS; no hidden cleanup applied.
+  Remote browser, cancel/history/load/semantic quality remain open.
+- User authorized startup on this node28.29.218.211. Exclusive run
+  workspace/logs/20261118T154532Z_qwen_wpe3imxu; model23630 on8092 TP4
+  GPU0-3, UI23631 on0.0.0.0:8080, external TTS healthy.
+  Process-local current-source runtime overlay and omni interpreter verified.
+- First engine attempt failed at profile_run: installed general plugin
+  vllm_omni_register_models replaced native thinker with vllm-omni wrapper,
+  causing deepstack meta/CUDA tensor mismatch. Native registry alone was
+  insufficient evidence of effective plugin resolution. Retry native server
+  with process-local VLLM_PLUGINS="" only; keep UI and failed raw logs intact.
+- Created user-named branch 模型兼容 from main baseline2f9677b. Parent only
+  has preexisting untracked tmp/wx_tts_ref.py; submodule worktrees clean.
+- Added selectable backbone/model/local tokenizer at application startup.
+  MiMo default preserved; Qwen plain voice only, no Agent enable; classifier
+  token IDs injected while retaining exact one-token probability/margin path.
+  Reused input_audio and streaming SSE content to existing external TTS.
+- Local AutoTokenizer actual checkpoint confirmed 有/无/已/未/⏸ single token
+  18830/42192/36667/38342/149660. Transformers rope key warning retained.
+  Direct vocab Unicode lookup returned None because BPE byte spelling is not
+  literal Unicode; AutoTokenizer encoding is authoritative.
+- Initialized env.sh then omni; sandbox env helper had SSH chmod/symlink
+  read-only warnings; escalated test environment initializes successfully.
+  Interpreter my_envs/miniconda3/envs/omni/bin/python; PYTHONPATH experiment,
+  20261029T153733Z_mimo_single_phase2_64fdf1db/runtime, current vllm-omni.
+- First7 focused tests:6 pass, fake SSE incremental test failed due to mock
+  emitting multiple lines as one iterator item. aiohttp parser expects line
+  iteration; changed mock framing, rerun same suite. transformers lazy import
+  consumed~71s; not model inference. Existing aiohttp warnings retained.
+- git diff --check passes. Eight GPUs reported empty; no model/service startup,
+  no changed checkpoint, no commit/push. GPU audio semantics, live streaming
+  Chat/TTS overlap, disconnect abort and history remain acceptance gates.
+- Added Chinese qwen_thinker_compatibility_20261118.md with thinker registry,
+  token table, launch templates and explicit unvalidated deployment boundaries.
+- Same focused suite rerun passed7/7 in72.094s: four test_backbone cases,
+  existing MiMo classifier, Chat payload/streaming and service defaults.
+  No more than4 tests per touched module; no full safety suite.
+
 ## 2026-11-10: VAED Polling Publication
 - User authorizes commit/push on feature/svad-vaed-polling, baseline8352472.
   Scope: existing polling/config/UI/tests, Chinese handoff/docs and plan records.

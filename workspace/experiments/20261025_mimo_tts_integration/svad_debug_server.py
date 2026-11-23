@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
 
 from agent_runtime import AgenticMiMoChatProvider
+from backbone import create_backbone
 from background_reasoning import BackgroundReasoning
 from mac_tools import EchoBridge, MacToolError, TOOL as MAC_ECHO_TOOL
 from browser_trust import BrowserTrust, browser_origin
@@ -169,6 +170,10 @@ def load_local_settings(path: Path) -> dict[str, object]:
 
 
 async def index(_request):
+    if _request.app["backbone"] == "wemm":
+        return web.Response(
+            text=(HERE / "svad_debug.html").read_text(encoding="utf-8").replace("MiMo", "WeMM"),
+            content_type="text/html")
     return web.FileResponse(HERE / "svad_debug.html", headers={"Cache-Control": "no-store"})
 
 
@@ -189,6 +194,8 @@ async def health(request):
         "tts": tts_healthy,
         "latency_ms": round((time.monotonic() - started) * 1000, 1),
         "mode": "fsm-avad-semantic-vad",
+        "backbone": request.app["backbone"],
+        "model": request.app["backbone_model"] or request.app["backbone"],
     })
 
 
@@ -1224,9 +1231,13 @@ async def context(app):
     LOG.info("AVAD backend loaded: %s", type(backend).__name__)
     async with ClientSession(trust_env=False, timeout=client_timeout()) as client:
         app["client"] = client
-        app["semantic_provider"] = MiMoSemanticVADProvider(client, app["mimo_url"])
+        semantic, chat = await asyncio.to_thread(
+            create_backbone, client, app["mimo_url"], backbone=app["backbone"],
+            model=app["backbone_model"], tokenizer_path=app["backbone_tokenizer"])
+        app["semantic_provider"] = semantic
         if not app["agentic"]:
-            app["chat_provider"] = MiMoChatProvider(client, app["mimo_url"])
+            chat.raw_sse_log_dir = app["raw_sse_log_dir"]
+            app["chat_provider"] = chat
         else:
             app["chat_provider"] = AgenticMiMoChatProvider(
                 client, app["mimo_url"], native_tool_calls=True)
@@ -1237,6 +1248,10 @@ async def context(app):
 def create_app(
     *,
     mimo_url="http://127.0.0.1:8090",
+    backbone="mimo",
+    backbone_model=None,
+    backbone_tokenizer=None,
+    raw_sse_log_dir=None,
     tts_url="http://29.213.195.135:8100",
     config_path=DEFAULT_CONFIG_PATH,
     agentic=False,
@@ -1246,7 +1261,15 @@ def create_app(
     mac_audit_file=None,
     mac_m2_policy_file=None,
 ):
+    if backbone not in ("mimo", "qwen3-omni", "wemm"):
+        raise ValueError("Unsupported backbone")
+    if agentic and backbone != "mimo":
+        raise ValueError("Non-MiMo backbones currently support plain voice only")
     app = web.Application(client_max_size=2 * 1024 * 1024)
+    app["backbone"] = backbone
+    app["backbone_model"] = backbone_model
+    app["backbone_tokenizer"] = backbone_tokenizer
+    app["raw_sse_log_dir"] = Path(raw_sse_log_dir) if raw_sse_log_dir else None
     app["mimo_url"] = mimo_url.rstrip("/")
     app["tts_url"] = tts_url.rstrip("/")
     app["config_path"] = Path(config_path)
@@ -1289,6 +1312,12 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--mimo-url", default="http://127.0.0.1:8090")
+    parser.add_argument("--backbone", choices=("mimo", "qwen3-omni", "wemm"), default="mimo")
+    parser.add_argument("--backbone-model")
+    parser.add_argument("--backbone-tokenizer", type=Path)
+    parser.add_argument("--raw-sse-log-dir", type=Path,
+                        help="Opt-in raw Chat SSE capture; contains generated conversation text")
+    parser.add_argument("--lm-url", dest="mimo_url", default=argparse.SUPPRESS)
     parser.add_argument("--tts-url", default="http://29.213.195.135:8100")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--agentic", action="store_true",
@@ -1303,6 +1332,10 @@ def main():
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     web.run_app(create_app(
         mimo_url=args.mimo_url,
+        backbone=args.backbone,
+        backbone_model=args.backbone_model,
+        backbone_tokenizer=args.backbone_tokenizer,
+        raw_sse_log_dir=args.raw_sse_log_dir,
         tts_url=args.tts_url,
         config_path=args.config,
         agentic=args.agentic,

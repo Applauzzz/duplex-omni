@@ -7,6 +7,88 @@ and Qwen3-TTS CustomVoice as the initial independent speech renderer.
 Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
+November23 user authorizes commit/push Qwen and WeMM compatibility.
+Publish native WeMM patch on vllm-src duplex-stage2 first, then parent
+model compatibility code/tests/docs and gitlink on 模型兼容; no force/merge.
+Exclude unrelated main config edits, online backup docs and temporary files.
+Fresh five focused application cases and both diff checks before publication.
+Preserve all live services and record remote commit receipts.
+
+November23 user requests live WeMM VAD web deployment on this node.
+Deployment gate met: run20261123T093134Z_wemm_web_t4yccipa,
+model201752/UI201753;28.29.216.252:8081. Five focused tests pass and
+two real WS turns yield50text deltas/20PCM chunks, overlap both turns, reset.
+Keep services running. Next remote browser voice/playback, interruption,
+long-history capacity and model-specific semantic quality calibration.
+Scope: selectable wemm backbone with actual classifier tokens, explicit
+non-thinking Chat, independent GPU4/5 model8094 and public8081 UI.
+Preserve existing MiMo8080/8090, FSM and main config. Copy current settings
+into exclusive run snapshot, correcting only WeMM's multi-token marker wording.
+Acceptance: <=5 focused backbone cases and real WS voice/history/reset,
+incremental text/external TTS; record runtime, endpoints and remaining gates.
+
+November23 user authorizes porting official WeMM support into local vllm-src.
+Port implemented; focused tests and real TP2 text/audio SSE plus one-token
+candidate logprobs passed. Test service exited0, GPUs released. Next separately
+wire application backbone/token IDs/history marker and accept FSM/TTS/cancel.
+Preserve dirty parent Qwen changes and running services. Compare pinned official
+source overlays with current APIs; port model/config/media contracts narrowly.
+Acceptance gates: focused config/processor/registry tests (<=5 per module),
+verified current-source imports, isolated real-checkpoint streaming audio/text
+and one-token decision validation when GPU/runtime resources permit.
+Do not install shared dependencies, change checkpoint files or claim inference
+acceptance from source inspection. Application backbone wiring is separate.
+
+November19 created feature/third-party-lm-api at2f9677b for external
+VASD/VAED and Chat providers. Dirty compatibility checkout not switched.
+Next obtain actual third-party API contract and select isolated development
+worktree/checkpoint, preserving FSM and streaming TTS. No provider code yet.
+
+November19 priority standby online MiMo on new28.29.216.252. Independent
+run20261119T142806Z_online_backup_2829216252_f79e8d0n, model4577/UI4578.
+Environment/ports/GPU preflight, dependency readiness/WS configure/reset and
+real voice28deltas/10audio407040bytes passed. Keep218121 service untouched and unfinished
+video/think diagnostics open. No duplicate startup or unverified policy fix.
+
+November19 priority redirected to video first-turn listening. Recent browser
+first Chat rejection confirmed; independent same-audio/video replay reproduces
+listening but reverse repetition invalidates simple media-order fix.
+No service patch/restart. Next capture exact failing browser input with opt-in
+private artifacts and separate policy versus multimodal engine replay.
+Thinking investigation paused; original false/content leak remains unresolved.
+
+November19 old180 node retired by user; restore online MiMo voice service on
+28.29.218.121 using exported457a7bbc, not dirty Qwen development checkout.
+New exclusive run20261119T121952Z_online_218121_9nxbk881, model4334/UI4335.
+Focused online cancellation/streaming tests2/2 passed; readiness and real
+WS audio26deltas/9PCM chunks403680bytes passed, semantic_complete Decode.
+Preserve300ms chunk/history30,
+new_user_turn cancellation and parser-before private raw SSE capture.
+Next remote browser audio/playback/cancel, warm long-answer overlap and
+thinking reproduction with history. This short cold reply audio follows text
+completion; no live overlap or universal thinking fix claim. Do not duplicate startup.
+
+November18 Qwen Chat thinking override removed and controlled A/B plus live
+WS gate passed: clean Chinese29deltas/11audio chunks with TTS overlap.
+Current UI63515/run20261118T172800Z_qwen_sse_y04h0fwm; model37788 unchanged.
+Raw SSE remains on. Qwen classifier/MiMo overrides unchanged.
+Next fresh browser role-label reproduction and remaining quality/cancel/load
+gates; no universal fix claim or vllm-omni engine migration.
+
+November18 native Qwen thinker deployment/local voice gate passed on
+28.29.218.211:8080, loopback model8092/PID37788, UI23631.
+Disable model process general plugins to prevent vllm-omni registry override.
+Real classifier and25delta/10TTS chunks plus terminal/overlap verified.
+Next remote browser microphone/playback, Qwen Assistant: output-prefix
+adaptation, semantic threshold quality, cancellation/history/load acceptance.
+See qwen_thinker_compatibility_20261118.md for actual config snapshot/logs.
+
+November18 model compatibility extension on branch 模型兼容, based on
+origin/main 2f9677b, excluding online new_user_turn policy. Add selectable
+Qwen3-Omni thinker-only backbone to existing AVAD/VASD/VAED/streaming text/TTS.
+Preserve MiMo default and FSM. Validate local tokenizer, provider requests and
+streaming before isolated GPU acceptance; no replacement of running services.
+
 November10 user authorizes committing and pushing feature/svad-vaed-polling.
 Implementation/docs checkpoint539b296 is committed and pushed; upstream set.
 Fresh focused verification passed5/5. A records-only followup captures receipt.
