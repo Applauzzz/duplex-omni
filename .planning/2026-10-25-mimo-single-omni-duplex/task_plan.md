@@ -7,6 +7,31 @@ and Qwen3-TTS CustomVoice as the initial independent speech renderer.
 Phase 1 discovery is complete. Phase 2 GPU feasibility is now authorized.
 
 ## Next Step
+November25 user authorizes commit/push only to feature/duplex-online-service,
+no main merge or service restart. Nov24 deployment and real voice lead pacing
+verification completed; implementation below is historical scope.
+Fresh focused publication checks passed7/7; publish sender/config/tests/docs
+and plan records. Actual proxy/client cancellation and load acceptance stay open.
+
+November24 clarification: buffer intent is short lead, not long pending audio.
+Implement server-only downlink_lead_ms200, chunk100, short queue400.
+Initial burst limited to200ms, replenished by monotonic sample duration;
+starvation reanchors without accumulating old credit. Normal done still waits
+estimated last sample endpoint. Seven focused tests rerun, no deployment yet.
+
+November24 authorized backend downlink PCM buffering/pacing for proxy11d9762.
+Local implementation gate complete:4sender+3WS tests passed, diff check clean.
+Next user-authorized deployment and actual proxy/client pacing/cancel acceptance;
+no live service replacement, commit or push in this task.
+Worktree /tmp/duplex-online-pacing-20261124 on feature/duplex-online-service
+at457a7bb; preserve dirty model compatibility checkout and live services.
+Only TTS downlink ownership changes, not acoustic/semantic FSM.
+Server-only100ms slices/10s bounded buffer; backpressure instead of dropping
+audio, monotonic sample-duration pacing, normal done after final duration.
+Cancellation joins sender before terminal, discards pending audio/barrier.
+Focused <=5 cases/module, prefer isolated WS cancellation/stream tests.
+No deployment/restart or commit/push without further request.
+
 November10 user authorizes committing and pushing feature/svad-vaed-polling.
 Implementation/docs checkpoint539b296 is committed and pushed; upstream set.
 Fresh focused verification passed5/5. A records-only followup captures receipt.

@@ -22,6 +22,7 @@ from mac_tools import EchoBridge, MacToolError, TOOL as MAC_ECHO_TOOL
 from browser_trust import BrowserTrust, browser_origin
 from mac_m2 import M2Bridge, FUNCTIONS as MAC_M2_FUNCTIONS, WRITES as MAC_M2_WRITES, CALLS as MAC_M2_CALLS
 from backend import client_timeout
+from downlink_audio import PacedPCMOutput
 from semantic_vad import (
     CHAT_HISTORY_TURNS,
     DEFAULT_CHAT_PROMPT,
@@ -80,13 +81,19 @@ def load_local_settings(path: Path) -> dict[str, object]:
     server_policy = payload.get("server_policy", {})
     if not isinstance(server_policy, dict) or set(server_policy) - {
         "vaed_mode", "vaed_window_ms", "interrupt_policy",
+        "downlink_chunk_ms", "downlink_buffer_ms", "downlink_lead_ms",
     }:
         raise ValueError("Invalid SVAD server_policy fields")
     interrupt_policy = server_policy.get("interrupt_policy", "playback")
     if interrupt_policy not in ("playback", "new_user_turn"):
         raise ValueError("interrupt_policy must be playback or new_user_turn")
+    downlink_chunk_ms = server_policy.get("downlink_chunk_ms", 100)
+    downlink_lead_ms = server_policy.get("downlink_lead_ms", 200)
+    downlink_buffer_ms = server_policy.get("downlink_buffer_ms", 400)
+    PacedPCMOutput(None, chunk_ms=downlink_chunk_ms, lead_ms=downlink_lead_ms,
+                   buffer_ms=downlink_buffer_ms)
     semantic_config.update({key: value for key, value in server_policy.items()
-                            if key != "interrupt_policy"})
+                            if key in {"vaed_mode", "vaed_window_ms"}})
     config = SemanticVADConfig.from_mapping({"type": "semantic_vad", **semantic_config})
     prompts = {}
     prompt_defaults = {
@@ -155,6 +162,9 @@ def load_local_settings(path: Path) -> dict[str, object]:
             "history_turns": history_turns,
             "background_reasoning": background_reasoning,
             "interrupt_policy": interrupt_policy,
+            "downlink_chunk_ms": downlink_chunk_ms,
+            "downlink_buffer_ms": downlink_buffer_ms,
+            "downlink_lead_ms": downlink_lead_ms,
             "threshold": config.threshold,
             "prefix_padding_ms": config.prefix_padding_ms,
             "silence_duration_ms": config.silence_duration_ms,
@@ -608,27 +618,45 @@ async def websocket(request):
                         "request_id": tts_session.task_id,
                     })
 
-            async def poll_audio():
+            async def emit_audio(chunk):
                 nonlocal total_samples
-                async for chunk in tts_session.stream_pcm():
-                    samples = len(chunk.pcm) // 2
-                    total_samples += samples
-                    await send({
+                samples = len(chunk.pcm) // 2
+                total_samples += samples
+                await send({
                         "type": "tts.audio",
                         "turn_id": turn_id,
                         "pcm": base64.b64encode(chunk.pcm).decode("ascii"),
                         "samples": samples,
                         "sample_rate_hz": chunk.sample_rate_hz,
                         "request_id": chunk.request_id,
-                    })
+                })
+
+            paced = (PacedPCMOutput(
+                emit_audio, chunk_ms=local_config["downlink_chunk_ms"],
+                lead_ms=local_config["downlink_lead_ms"],
+                buffer_ms=local_config["downlink_buffer_ms"])
+                if local_config["interrupt_policy"] == "new_user_turn" else None)
+
+            async def poll_audio():
+                async for chunk in tts_session.stream_pcm():
+                    if paced is None:
+                        await emit_audio(chunk)
+                    else:
+                        await paced.put(chunk)
+                if paced is not None:
+                    await paced.finish()
 
             submit_task = asyncio.create_task(
                 submit_text(), name=f"tts-submit-{session_id}-{turn_id}")
             poll_task = asyncio.create_task(
                 poll_audio(), name=f"tts-poll-{session_id}-{turn_id}")
+            tasks = {submit_task, poll_task}
+            if paced is not None:
+                tasks.add(asyncio.create_task(
+                    paced.run(), name=f"tts-downlink-{session_id}-{turn_id}"))
             try:
                 done, pending = await asyncio.wait(
-                    {submit_task, poll_task}, return_when=asyncio.FIRST_EXCEPTION)
+                    tasks, return_when=asyncio.FIRST_EXCEPTION)
                 for task in done:
                     error = task.exception()
                     if error is not None:
@@ -643,16 +671,20 @@ async def websocket(request):
             except asyncio.CancelledError:
                 raise
             except Exception as error:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
                 LOG.exception("TTS failed session=%s turn=%s", session_id, turn_id)
                 await send({"type": "tts.error", "turn_id": turn_id,
                             "message": str(error)[:500]})
                 while await tts_queue.get() is not None:
                     pass
             finally:
-                for task in (submit_task, poll_task):
+                for task in tasks:
                     if not task.done():
                         task.cancel()
-                await asyncio.gather(submit_task, poll_task, return_exceptions=True)
+                await asyncio.gather(*tasks, return_exceptions=True)
 
         tts_task = asyncio.create_task(run_tts(), name=f"tts-{session_id}-{turn_id}") \
             if tts_session is not None else None
@@ -907,6 +939,9 @@ async def websocket(request):
                         "vasd_window_ms": config.vasd_window_ms,
                         "vaed_mode": config.vaed_mode,
                         "interrupt_policy": local_config["interrupt_policy"],
+                        "downlink_chunk_ms": local_config["downlink_chunk_ms"],
+                        "downlink_buffer_ms": local_config["downlink_buffer_ms"],
+                        "downlink_lead_ms": local_config["downlink_lead_ms"],
                         "vaed_window_ms": config.vaed_window_ms,
                         "sem_probability_threshold": config.sem_probability_threshold,
                         "sem_margin_threshold": config.sem_margin_threshold,

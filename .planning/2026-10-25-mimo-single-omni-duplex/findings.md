@@ -1,5 +1,14 @@
 # Findings & Decisions
 
+## 2026-11-24: Proxy Pacing Responsibility
+- Proxy11d9762 drops downlink pacing queue/task/end barrier; directly converts
+  tts.audio and tts.done. Its backend pacing assumption was not yet implemented.
+- Online application run_chat owns TTS task and joins children on cancellation.
+  Attach queue/sender to that lifetime; keep text decode/TTS submit concurrent.
+  Backend natural clock estimates output duration, not actual client playback.
+  Already sent samples cannot be revoked; bounded slices limit extra tail only
+  absent additional transport/client buffering. No unconditional latency bound.
+
 ## 2026-11-10: Agent SDK Versus Application Harness
 - Current duplex page uses browser RealtimeSession with custom transport and
   tracingDisabled=true. Manifest has one duplex_assistant with no handoffs.

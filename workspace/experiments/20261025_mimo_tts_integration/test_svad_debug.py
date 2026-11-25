@@ -213,6 +213,85 @@ class FailingTTSProvider(TTSProvider):
 
 
 class DebugServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_paced_audio_end_and_cancel_without_playback(self):
+        for cancel in (False, True):
+            with self.subTest(cancel=cancel):
+                self.settings["server_policy"] = {
+                    "interrupt_policy": "new_user_turn",
+                    "downlink_chunk_ms": 100, "downlink_buffer_ms": 200,
+                    "downlink_lead_ms": 200,
+                }
+                self.config_path.write_text(json.dumps(self.settings), encoding="utf-8")
+                class BurstSession(TTSSession):
+                    async def stream_pcm(self):
+                        from streaming_tts import PCMChunk
+                        await self.started.wait()
+                        yield PCMChunk(b"\1\0" * 12000, 24000, self.task_id)
+                        await self.finished_event.wait()
+                self.tts.session_class = BurstSession
+                class Acoustic:
+                    values = iter((True, True, False, True, False))
+                    previous = False
+                    def process_base64(self, *_args, **_kwargs):
+                        active = next(self.values)
+                        stopped = self.previous and not active
+                        self.previous = active
+                        return SimpleNamespace(speech_active=active, speech_stopped=stopped)
+                    def reset(self):
+                        pass
+                self.app["adapter_factory"] = lambda config, provider, **_kwargs: (
+                    SemanticRealtimeAdapter(config, provider, vad=Acoustic()))
+                async with asyncio.timeout(5):
+                    async with self.client.ws_connect(self.server.make_url("/ws")) as ws:
+                        await ws.send_json({"type": "configure", "tts_enabled": True,
+                                            "downlink_chunk_ms": 500, "downlink_lead_ms": 2000})
+                        configured = await ws.receive_json()
+                        self.assertEqual(configured["config"]["downlink_chunk_ms"], 100)
+                        self.assertEqual(configured["config"]["downlink_lead_ms"], 200)
+                        audio = {"type": "audio", "format": "pcm16", "sample_rate_hz": 16000,
+                                 "audio": base64.b64encode(b"\1\0" * 3200).decode()}
+                        for _ in range(3):
+                            await ws.send_json(audio)
+                            self.assertEqual((await ws.receive_json())["type"], "transition")
+                        events = []
+                        first_time = None
+                        while first_time is None:
+                            event = await ws.receive_json()
+                            events.append(event)
+                            if event["type"] == "tts.audio":
+                                first_time = asyncio.get_running_loop().time()
+                        old_turn = event["turn_id"]
+                        self.assertEqual(event["samples"], 2400)
+                        if cancel:
+                            await ws.send_json({"type": "playback.state", "active": True})
+                            await ws.send_json(audio)
+                            while True:
+                                event = await ws.receive_json()
+                                events.append(event)
+                                if event["type"] == "transition":
+                                    self.assertTrue(event["transition"]["interrupt"])
+                                    break
+                            cancelled_index = next(i for i, e in enumerate(events)
+                                                   if e["type"] in ("chat.cancelled", "tts.cancelled"))
+                            self.assertFalse(any(e["type"] in ("tts.audio", "tts.done")
+                                                 and e.get("turn_id") == old_turn
+                                                 for e in events[cancelled_index + 1:]))
+                            await ws.send_json(audio)
+                            while True:
+                                event = await ws.receive_json()
+                                self.assertFalse(event["type"] in ("tts.audio", "tts.done")
+                                                 and event.get("turn_id") == old_turn)
+                                if event["type"] == "chat.started":
+                                    self.assertNotEqual(event["turn_id"], old_turn)
+                                    break
+                        else:
+                            while events[-1]["type"] != "tts.done":
+                                events.append(await ws.receive_json())
+                            self.assertGreaterEqual(asyncio.get_running_loop().time() - first_time, .47)
+                            self.assertEqual(sum(e["samples"] for e in events
+                                                 if e["type"] == "tts.audio"), 12000)
+                            self.assertEqual(events[-1]["samples"], 12000)
+
     async def test_new_user_turn_interrupts_without_playback_feedback(self):
         for completed in (False, True):
             with self.subTest(completed=completed):

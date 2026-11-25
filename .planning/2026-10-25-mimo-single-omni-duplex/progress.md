@@ -1,5 +1,86 @@
 # Progress Log
 
+## 2026-11-25: Online Pacing Publication
+- User requests commit/push only to feature/duplex-online-service, no main merge.
+  Branch worktree /tmp/duplex-online-pacing-20261124 starts at457a7bb; preserve
+  dirty model checkout, submodule links and all running services.
+- Publication scope: bounded lead-paced PCM sender, server-only config,
+  TTS lifecycle integration, four sender/three WS tests, Chinese delivery docs
+  and existing plan changes. No GPU/model/FSM modifications or raw artifacts.
+- env.sh + omni interpreter and semantic_vad/svad_debug_server import roots
+  verified in this worktree. PYTHONPATH uses worktree experiment,
+  main20261026T105528Z_mimo_single_phase2_daaf8fb0/runtime and main vllm-omni.
+  Fresh python-B -m unittest test_downlink_audio plus three selected
+  DebugServiceTests completed0:7/7 in3.409s. Existing aiohttp AppKey and
+  deprecation warnings only. No real model requests or service restarts.
+  Docs now distinguish the initial implementation state from Nov24 deployment.
+
+## 2026-11-24: Live Lead Service Deployment
+- User authorizes startup. Preflight businessIP28.29.216.252 and owned UI4578,
+  MiMo4577/WeMM201752+201753 confirmed. env.sh+omni start_paced_online.py
+  copies source into exclusive20261124T100504Z_online_lead_n79azdxj baseline,
+  copies old config preserving300ms/history30 and adds100/200/400 policy.
+  Exact imports verified, model/external TTS healthy before stopping only4578.
+  New detached UI296471 on8080; MiMo8090 and WeMM8081/8094 unchanged.
+- env.sh+omni verify_paced_online.py <run> completed0 after runtime cold imports:
+  real voice24chat.delta/71tts.audio/331440PCM bytes,6.905s audio;
+  first audio to normal done6.905696s,max observed lead0.199924s,
+  every slice<=100ms. Health both true, configured/defaults100/200/400 verified.
+  Run retains launch/config/UI log/rawSSE/live events/audio/summary.
+  Real browser/proxy cancellation/network acceptance still open.
+  Source remains uncommitted online worktree, no push; old run logs preserved.
+
+## 2026-11-24: Short Lead Window Clarification
+- User paused deployment before any process stop/start, clarified buffer should
+  support advance send, authorized200ms lead. Updated sender/config/WS fields:
+  downlink_lead_ms200 independent of100ms chunk and400ms queue.
+- Sender waits only if next slice end exceeds natural clock+lead; starvation
+  and transport stalls reanchor estimated endpoint instead of accruing credit.
+  Normal done still waits endpoint; no audio removed and cancellation unchanged.
+  Tests retain4sender/3WS cases with initial burst/lead validation assertions.
+  env.sh+omni current worktree/runtime unittest rerun underway; no restart.
+- Combined focused rerun completed0:7/7 in3.494s (4sender/3WS).
+  Initial lead burst, refill/starvation, server-only lead override rejection,
+  end timing, cancellation and original baseline pass; aiohttp warnings only.
+  No service start/stop, commit/push. New lead defaults ready for deployment.
+
+## 2026-11-24: Backend Downlink Pacing
+- Read installed planning skill/selected branch plan/stage docs and code.
+  Main checkout dirty model compatibility preserved, submodules clean.
+  git worktree add first failed readonly .git; approved rerun created separate
+  /tmp/duplex-online-pacing-20261124 on online branch457a7bb.
+- Requested proxy path absent on node; accessible Omni/duplex_proxy_tt
+  HEAD11d9762 (Nov23 fix audio control) removes proxy pacing/buffer/barrier.
+  Backend currently emits TTS as produced. Existing new_user_turn ignores
+  playback feedback but is not yet a sample-duration paced sender.
+- Scope before edits: standalone bounded PCM sender and integration only for
+  new_user_turn mode,100ms/10s server policy, no FSM/default playback changes.
+  Normal end waits last sample duration; cancellation aborts/joins sender
+  and clears queued PCM, preserves generated interrupted text semantics.
+  No production reload or model changes. Focused unit and WS gates next.
+- Implemented PacedPCMOutput bounded slices/sample clock, server-only config
+  validation and new_user_turn TTS sender task/end barrier. Four sender tests
+  and three selected WS tests. First imports failed missing Mac contract JSON:
+  worktree submodule dirs uninitialized; linked existing read-only src into
+  worktree submodule for tests, no install/shared changes. Corrected configured
+  response to expose server-owned values; reruns underway.
+- Second import attempt failed missing worktree vllm-omni splitter source;
+  linked existing vllm_omni package read-only into empty submodule directory.
+  No source/installer change. Interpreter/import check shows omni Python and
+  semantic_vad/svad_debug_server from /tmp/duplex-online-pacing-20261124.
+- env.sh+omni directed unittest loader test_downlink_audio passed4/4 in0.488s.
+  PYTHONPATH=worktree experiment:20261026T105528Z_mimo_single_phase2_daaf8fb0/
+  runtime:main vllm-omni. Approved python-B -m unittest three DebugServiceTests
+  passed3/3 in3.211s (paced_audio_end_and_cancel_without_playback,
+  new_user_turn_interrupts_without_playback_feedback,
+  tts_streams_one_task_with_incremental_text). Existing aiohttp deprecation/
+  AppKey warnings only. Tests use isolated sockets/mock providers, no GPU calls.
+- Both new_user_turn completion/cancellation and unchanged playback baseline
+  covered. git diff --check clean; focused code/doc gate met. Chinese delivery
+  doc and canonical stage record added. No deploy/restart/commit/push.
+  Current live8080/8081 remain old implementations. Real proxy/client audio,
+  network backpressure, queue saturation and load acceptance still open.
+
 ## 2026-11-10: Agent Framework Capability Explanation
 - User requests architecture explanation, not implementation. Read selected
   plan and current Python/TS adapter, agent definitions, page, background

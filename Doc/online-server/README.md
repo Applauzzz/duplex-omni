@@ -98,3 +98,8 @@ AVAD 门控、兜底计时和配置归属。
   或取消后远端 TTS 计算立即停止。
 
 本次整理没有新增生产部署、修改运行代码或执行新的音频/负载验收。
+# 2026-11-24 下行节拍更新
+
+新增后端 PCM Buffer/按时间发送与正常结束屏障，参见
+[backend_downlink_pacing_20261124.md](backend_downlink_pacing_20261124.md)。
+仅 `new_user_turn` 模式启用；旧文档中的客户端 playback 要求对应历史模式。

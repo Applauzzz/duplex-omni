@@ -34,6 +34,9 @@
     "background_reasoning_prompt": "后台任务提交、占位回答与后续交付规则。task/context沿用原工具schema；不允许自定义async参数或文本伪调用。"
   },
   "server_policy": {
+    "downlink_chunk_ms": 100,
+    "downlink_lead_ms": 200,
+    "downlink_buffer_ms": 400,
     "vaed_mode": "chunk"
   },
   "config": {
