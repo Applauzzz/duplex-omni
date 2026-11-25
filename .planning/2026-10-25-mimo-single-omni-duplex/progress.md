@@ -14,6 +14,12 @@
   DebugServiceTests completed0:7/7 in3.409s. Existing aiohttp AppKey and
   deprecation warnings only. No real model requests or service restarts.
   Docs now distinguish the initial implementation state from Nov24 deployment.
+- git fetch origin completed0; HEAD/upstream0/0 before publication.
+  git diff --check and cached check passed. Scoped11-file commit9bb51ef
+  (feat: pace online TTS output with bounded audio lead) created successfully.
+  env.sh + GIT_TERMINAL_PROMPT=0 git push origin
+  HEAD:refs/heads/feature/duplex-online-service completed0, remote advanced
+  457a7bb..9bb51ef. No main merge, force push, model checkout edit or restart.
 
 ## 2026-11-24: Live Lead Service Deployment
 - User authorizes startup. Preflight businessIP28.29.216.252 and owned UI4578,
